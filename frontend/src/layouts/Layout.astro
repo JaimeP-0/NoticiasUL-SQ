@@ -1,0 +1,371 @@
+---
+// Layout principal con Tailwind CSS
+---
+
+<!doctype html>
+<html lang="es" class="h-full light">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<link rel="icon" type="image/png" href="https://images.vexels.com/media/users/3/160402/isolated/preview/979b06b30a76e731d5447261b4f9e5fd-plano-de-papel-de-periodico-de-noticias.png?width=1130" />
+		<meta name="generator" content={Astro.generator} />
+		<title>Noticias UL</title>
+	</head>
+	<body class="min-h-full bg-gray-50 dark:bg-gray-900 transition-colors">
+		<!-- Header con reloj -->
+		<header class="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+			<div class="max-w-7xl mx-auto px-4 py-3 flex justify-between items-center">
+				<a href="/" data-router class="text-2xl font-bold text-gray-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400 transition-colors">
+					Noticias UL
+				</a>
+				<div class="flex items-center gap-4 text-sm text-gray-600 dark:text-gray-400">
+					<!-- Reloj (siempre visible) -->
+					<div class="flex items-center gap-2">
+					<i class="bi bi-clock"></i>
+					<span id="reloj-actual" class="tabular-nums"></span>
+					</div>
+					<!-- Icono de login (solo visible cuando NO hay sesión) -->
+					<a id="icono-login" href="/login" data-router class="flex items-center gap-2 text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 transition-colors" title="Iniciar sesión">
+						<i class="bi bi-box-arrow-in-right text-xl"></i>
+					</a>
+					<!-- Información del usuario (solo visible cuando hay sesión) -->
+					<div id="usuario-info" class="hidden flex items-center gap-3">
+						<div class="flex flex-col items-end">
+							<span id="usuario-nombre" class="text-gray-900 dark:text-white font-medium"></span>
+							<span id="usuario-rol" class="text-xs text-gray-500 dark:text-gray-400"></span>
+						</div>
+						<button id="btn-logout" class="p-2 text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors" title="Cerrar sesión">
+							<i class="bi bi-box-arrow-right text-xl"></i>
+					</button>
+					</div>
+				</div>
+			</div>
+		</header>
+
+		<!-- Menú de navegación -->
+		<nav class="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+			<div class="max-w-7xl mx-auto px-4">
+				<ul class="flex justify-center gap-6 py-2">
+					<li>
+						<a href="/noticias" data-router class="nav-link px-3 py-2 text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 border-b-2 border-transparent hover:border-blue-600 transition-colors">
+							Noticias
+						</a>
+					</li>
+					<li>
+						<a id="link-agregar" href="/agregar" data-router class="nav-link px-3 py-2 text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 border-b-2 border-transparent hover:border-blue-600 transition-colors hidden">
+							Agregar
+						</a>
+					</li>
+					<li>
+						<a id="link-admin" href="/admin" data-router class="nav-link px-3 py-2 text-gray-700 dark:text-gray-300 hover:text-purple-600 dark:hover:text-purple-400 border-b-2 border-transparent hover:border-purple-600 transition-colors hidden">
+							Administración
+						</a>
+					</li>
+					<li class="hidden">
+						<a id="link-debug" href="/debug" data-router class="nav-link px-3 py-2 text-gray-700 dark:text-gray-300 hover:text-green-600 dark:hover:text-green-400 border-b-2 border-transparent hover:border-green-600 transition-colors">
+							Debug BD
+						</a>
+					</li>
+					<li class="hidden">
+						<a href="/patrones" data-router class="nav-link px-3 py-2 text-gray-700 dark:text-gray-300 hover:text-purple-600 dark:hover:text-purple-400 border-b-2 border-transparent hover:border-purple-600 transition-colors">
+							Patrones
+						</a>
+					</li>
+				</ul>
+			</div>
+		</nav>
+
+		<!-- Contenido principal -->
+		<main class="max-w-4xl mx-auto px-4 py-8">
+			<slot />
+		</main>
+
+		<!-- Botón flotante para cambiar tema -->
+		<div class="fixed bottom-4 left-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50">
+			<ul class="flex gap-1 p-1">
+				<li class="theme-toggle" data-bs-theme-value="light" title="Modo Claro">
+					<button class="p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+						<i class="bi bi-sun-fill text-yellow-500"></i>
+					</button>
+				</li>
+				<li class="theme-toggle" data-bs-theme-value="dark" title="Modo Oscuro">
+					<button class="p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+						<i class="bi bi-moon-stars-fill text-blue-500"></i>
+					</button>
+				</li>
+			</ul>
+		</div>
+
+		<!-- Scripts -->
+		<script src="https://code.jquery.com/jquery-3.7.1.min.js" crossorigin="anonymous"></script>
+		<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous" defer></script>
+		<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
+		<!-- Pusher para notificaciones en tiempo real -->
+		<script src="https://js.pusher.com/8.2.0/pusher.min.js"></script>
+		
+		<script is:inline>
+			// Funciones globales del Layout
+			var bootstrapTheme;
+
+			function setTheme(theme) {
+				const html = document.documentElement;
+				// Remover todas las clases de tema
+				html.classList.remove('light', 'dark');
+				// Agregar la clase del tema seleccionado
+				html.classList.add(theme);
+				// Guardar preferencia en localStorage
+				localStorage.setItem('theme', theme);
+			}
+
+			function showActiveTheme(theme) {
+				document.querySelectorAll('.theme-toggle').forEach((el) => {
+					el.classList.remove('bg-blue-100', 'dark:bg-blue-900', 'bg-blue-200');
+				});
+				const active = document.querySelector(`[data-bs-theme-value="${theme}"]`);
+				if (active) {
+					active.classList.add('bg-blue-100', 'dark:bg-blue-900');
+			}
+			}
+
+			// Aplicar tema inmediatamente (antes de que se cargue el DOM)
+			(function() {
+				const savedTheme = localStorage.getItem('theme') || 'light';
+				document.documentElement.classList.remove('light', 'dark');
+				document.documentElement.classList.add(savedTheme);
+			})();
+
+			// Inicialización
+			document.addEventListener('DOMContentLoaded', function() {
+				// Tema inicial: cargar de localStorage o usar 'light' por defecto
+				bootstrapTheme = localStorage.getItem('theme') || 'light';
+				setTheme(bootstrapTheme);
+				showActiveTheme(bootstrapTheme);
+
+				document.querySelectorAll('.theme-toggle').forEach((el) => {
+					el.addEventListener('click', (e) => {
+						e.preventDefault();
+						bootstrapTheme = el.getAttribute('data-bs-theme-value');
+						setTheme(bootstrapTheme);
+						showActiveTheme(bootstrapTheme);
+					});
+				});
+
+				// Reloj (siempre visible)
+				const reloj = document.getElementById('reloj-actual');
+				function actualizarReloj() {
+					if (!reloj) return;
+					reloj.textContent = new Date().toLocaleString('es-ES');
+				}
+				actualizarReloj();
+				setInterval(actualizarReloj, 1000);
+
+				// Verificar autenticación y mostrar usuario desde el servidor
+				const usuarioInfo = document.getElementById('usuario-info');
+				const usuarioNombre = document.getElementById('usuario-nombre');
+				const usuarioRol = document.getElementById('usuario-rol');
+				const btnLogout = document.getElementById('btn-logout');
+				const linkAgregar = document.getElementById('link-agregar');
+				const linkAdmin = document.getElementById('link-admin');
+				const iconoLogin = document.getElementById('icono-login');
+				
+				// Función para obtener etiqueta del rol
+				function getRoleLabel(rol) {
+					const labels = {
+						'superadmin': 'Super Administrador',
+						'admin': 'Administrador',
+						'maestro': 'Maestro',
+						'usuario': 'Usuario'
+					};
+					return labels[rol] || rol;
+				}
+				
+				// Función para obtener color del rol
+				function getRoleColor(rol) {
+					const colors = {
+						'superadmin': 'text-purple-600 dark:text-purple-400',
+						'admin': 'text-red-600 dark:text-red-400',
+						'maestro': 'text-blue-600 dark:text-blue-400',
+						'usuario': 'text-gray-600 dark:text-gray-400'
+					};
+					return colors[rol] || colors.usuario;
+				}
+				
+				// Obtener información del usuario desde el servidor
+				// No verificar en la página de login (evita 401 innecesario)
+				if (window.location.pathname === '/login') {
+					// En la página de login, solo mostrar icono de login
+					if (iconoLogin) {
+						iconoLogin.classList.remove('hidden');
+					}
+					return;
+				}
+				
+				// Función para verificar autenticación con debounce
+				let authCheckTimeout = null;
+				let lastAuthCheck = 0;
+				const AUTH_CHECK_THROTTLE = 2000; // Solo verificar cada 2 segundos máximo
+				
+				async function verificarAutenticacion() {
+					const now = Date.now();
+					if (now - lastAuthCheck < AUTH_CHECK_THROTTLE) {
+						// Ya se verificó recientemente, usar resultado en caché si existe
+						if (window._lastAuthResult) {
+							return window._lastAuthResult;
+						}
+					}
+					
+					// Limpiar timeout anterior si existe
+					if (authCheckTimeout) {
+						clearTimeout(authCheckTimeout);
+					}
+					
+					// Usar /api directamente - el proxy de Astro lo redirigirá a localhost:5000
+					return new Promise((resolve) => {
+						authCheckTimeout = setTimeout(async () => {
+							try {
+								const res = await fetch('/api/auth/me', {
+									credentials: 'include',
+									cache: 'no-store'
+								});
+								
+								// 401 es normal cuando no hay sesión, no es un error
+								if (res.status === 401) {
+									const result = { authenticated: false };
+									window._lastAuthResult = result;
+									lastAuthCheck = Date.now();
+									resolve(result);
+									return;
+								}
+								
+								if (!res.ok) {
+									const result = { authenticated: false };
+									window._lastAuthResult = result;
+									lastAuthCheck = Date.now();
+									resolve(result);
+									return;
+								}
+								
+								const data = await res.json();
+								window._lastAuthResult = data;
+								lastAuthCheck = Date.now();
+								resolve(data);
+							} catch (error) {
+								const result = { authenticated: false };
+								window._lastAuthResult = result;
+								lastAuthCheck = Date.now();
+								resolve(result);
+							}
+						}, 100); // Debounce de 100ms
+					});
+				}
+				
+				// Función para actualizar la UI con los datos del usuario
+				function actualizarUI(data) {
+					if (data.authenticated && usuarioInfo && usuarioNombre && usuarioRol && btnLogout) {
+						// Usuario autenticado: ocultar icono de login
+						if (iconoLogin) {
+							iconoLogin.classList.add('hidden');
+						}
+						
+						// Mostrar información del usuario
+						usuarioNombre.textContent = data.nombre || data.usuario;
+						usuarioRol.textContent = getRoleLabel(data.rol);
+						usuarioRol.className = `text-xs ${getRoleColor(data.rol)} font-medium`;
+						usuarioInfo.classList.remove('hidden');
+					
+					// Mostrar enlaces según el rol
+					const rol = data.rol || 'usuario';
+					const linkDebug = document.getElementById('link-debug');
+					
+					// Ocultar todos los enlaces primero
+					if (linkAgregar) linkAgregar.classList.add('hidden');
+					if (linkAdmin) linkAdmin.classList.add('hidden');
+					if (linkDebug) linkDebug.classList.add('hidden');
+					
+					// Mostrar según el rol:
+					// - usuario (alumno): Solo "Noticias" (ya visible)
+					// - maestro: "Noticias" y "Agregar"
+					// - admin: "Noticias", "Agregar" y "Administración"
+					// - superadmin: Todo (incluyendo "Debug BD")
+					
+					if (rol === 'maestro' || rol === 'admin' || rol === 'superadmin') {
+						if (linkAgregar) linkAgregar.classList.remove('hidden');
+					}
+					
+					if (rol === 'admin' || rol === 'superadmin') {
+						if (linkAdmin) linkAdmin.classList.remove('hidden');
+					}
+					
+					if (rol === 'superadmin') {
+						if (linkDebug) linkDebug.classList.remove('hidden');
+					}
+					
+						btnLogout.addEventListener('click', async () => {
+							await fetch('/api/auth/logout', {
+								method: 'POST',
+								credentials: 'include'
+							});
+						window.location.href = '/';
+					});
+					} else {
+						// Usuario NO autenticado: mostrar icono de login
+						if (iconoLogin) {
+							iconoLogin.classList.remove('hidden');
+						}
+					}
+				}
+				
+				// Exponer funciones globalmente para que puedan ser llamadas desde otros scripts
+				window.verificarAutenticacion = verificarAutenticacion;
+				window.actualizarUI = actualizarUI;
+				
+				// Verificar autenticación al cargar la página
+				verificarAutenticacion().then(actualizarUI).catch((error) => {
+					// Solo mostrar error si no es un 401 (que es esperado)
+					if (error.message && !error.message.includes('401')) {
+						console.warn('Error al verificar autenticación:', error);
+					}
+					// Si hay error, mostrar icono de login
+					if (iconoLogin) {
+						iconoLogin.classList.remove('hidden');
+					}
+				});
+				
+				// Sincronizar sesión entre pestañas: verificar autenticación cuando la pestaña recibe foco
+				// Esto asegura que si haces login en una pestaña, las otras se actualicen cuando reciban foco
+				let focusCheckTimeout = null;
+				window.addEventListener('focus', () => {
+					if (focusCheckTimeout) clearTimeout(focusCheckTimeout);
+					focusCheckTimeout = setTimeout(() => {
+						verificarAutenticacion().then(actualizarUI);
+					}, 500); // Debounce de 500ms
+				});
+				
+				// También verificar cuando se hace visibilidad de la página (útil para móviles)
+				document.addEventListener('visibilitychange', () => {
+					if (!document.hidden) {
+						if (focusCheckTimeout) clearTimeout(focusCheckTimeout);
+						focusCheckTimeout = setTimeout(() => {
+							verificarAutenticacion().then(actualizarUI);
+						}, 500); // Debounce de 500ms
+					}
+				});
+
+				// Marcar enlace activo según la URL actual
+				const currentPath = window.location.pathname;
+				document.querySelectorAll('.nav-link').forEach((link) => {
+					if (link.getAttribute('href') === currentPath) {
+						link.classList.add('active');
+					}
+				});
+			});
+		</script>
+	</body>
+</html>
+
+<style>
+	.nav-link.active {
+		border-bottom-color: rgb(37 99 235) !important;
+		color: rgb(37 99 235) !important;
+	}
+</style>

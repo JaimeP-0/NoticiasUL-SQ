@@ -1,0 +1,302 @@
+---
+// Página para explicar visualmente todos los patrones de diseño implementados
+import Layout from '../layouts/Layout.astro';
+---
+
+<Layout>
+	<div id="app-container" class="min-h-screen bg-gray-50 dark:bg-gray-900 py-8">
+		<div class="max-w-6xl mx-auto px-4">
+			<h1 class="text-4xl font-bold text-gray-900 dark:text-white mb-2">Patrones de Diseño Implementados</h1>
+			<p class="text-gray-600 dark:text-gray-400 mb-8">Explicación visual de todos los patrones de diseño utilizados en el proyecto</p>
+
+			<!-- Backend Patterns -->
+			<section class="mb-12">
+				<h2 class="text-3xl font-bold text-gray-900 dark:text-white mb-6 border-b-2 border-blue-500 pb-2">Backend (Python/Flask)</h2>
+				
+				<!-- Factory Pattern -->
+				<div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 mb-6">
+					<div class="flex items-center justify-between mb-4">
+						<h3 class="text-2xl font-bold text-blue-600 dark:text-blue-400">1. Factory Pattern</h3>
+						<span class="px-3 py-1 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 rounded-full text-sm font-semibold">Creacional</span>
+					</div>
+					<p class="text-gray-700 dark:text-gray-300 mb-4">
+						<strong>Propósito:</strong> Crear objetos sin especificar la clase exacta que se va a crear.
+					</p>
+					<div class="bg-gray-50 dark:bg-gray-700 rounded p-4 mb-4">
+						<p class="text-sm text-gray-600 dark:text-gray-400 mb-2"><strong>Archivos:</strong></p>
+						<ul class="list-disc list-inside text-sm text-gray-700 dark:text-gray-300 space-y-1">
+							<li><code class="bg-gray-200 dark:bg-gray-600 px-2 py-1 rounded">factory_noticias.py</code> - Crea diferentes tipos de noticias</li>
+							<li><code class="bg-gray-200 dark:bg-gray-600 px-2 py-1 rounded">validators.py</code> - Crea validadores según el tipo de noticia</li>
+							<li><code class="bg-gray-200 dark:bg-gray-600 px-2 py-1 rounded">role_validators.py</code> - Crea validadores según el rol del usuario</li>
+						</ul>
+					</div>
+					<div class="bg-blue-50 dark:bg-blue-900/20 rounded p-4">
+						<p class="text-sm font-semibold text-blue-900 dark:text-blue-200 mb-2">Ejemplo de uso:</p>
+						<pre class="text-xs text-gray-800 dark:text-gray-200 overflow-x-auto"><code># Crear noticia según tipo
+noticia = NoticiaFactory.crear('importante', titulo, contenido, autor)
+
+# Crear validador según tipo
+validador = NoticiaValidatorFactory.create_validator('evento')
+
+# Crear validador según rol
+validador = RoleValidatorFactory.create_validator('admin')</code></pre>
+					</div>
+				</div>
+
+				<!-- Singleton Pattern -->
+				<div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 mb-6">
+					<div class="flex items-center justify-between mb-4">
+						<h3 class="text-2xl font-bold text-green-600 dark:text-green-400">2. Singleton Pattern</h3>
+						<span class="px-3 py-1 bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 rounded-full text-sm font-semibold">Creacional</span>
+					</div>
+					<p class="text-gray-700 dark:text-gray-300 mb-4">
+						<strong>Propósito:</strong> Asegurar que una clase tenga solo una instancia y proporcionar un punto de acceso global a ella.
+					</p>
+					<div class="bg-gray-50 dark:bg-gray-700 rounded p-4 mb-4">
+						<p class="text-sm text-gray-600 dark:text-gray-400 mb-2"><strong>Archivos:</strong></p>
+						<ul class="list-disc list-inside text-sm text-gray-700 dark:text-gray-300 space-y-1">
+							<li><code class="bg-gray-200 dark:bg-gray-600 px-2 py-1 rounded">singleton_config.py</code> - Configuración única</li>
+							<li><code class="bg-gray-200 dark:bg-gray-600 px-2 py-1 rounded">database.py</code> - Pool de conexiones único</li>
+							<li><code class="bg-gray-200 dark:bg-gray-600 px-2 py-1 rounded">firebase_service.py</code> - Servicio Firebase único</li>
+						</ul>
+					</div>
+					<div class="bg-green-50 dark:bg-green-900/20 rounded p-4">
+						<p class="text-sm font-semibold text-green-900 dark:text-green-200 mb-2">Ejemplo de uso:</p>
+						<pre class="text-xs text-gray-800 dark:text-gray-200 overflow-x-auto"><code># Siempre devuelve la misma instancia
+db = Database()  # Primera llamada
+db2 = Database()  # Misma instancia que db
+
+firebase = FirebaseService()  # Instancia única</code></pre>
+					</div>
+				</div>
+
+				<!-- Facade Pattern -->
+				<div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 mb-6">
+					<div class="flex items-center justify-between mb-4">
+						<h3 class="text-2xl font-bold text-purple-600 dark:text-purple-400">3. Facade Pattern</h3>
+						<span class="px-3 py-1 bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200 rounded-full text-sm font-semibold">Estructural</span>
+					</div>
+					<p class="text-gray-700 dark:text-gray-300 mb-4">
+						<strong>Propósito:</strong> Proporcionar una interfaz simplificada a un subsistema complejo.
+					</p>
+					<div class="bg-gray-50 dark:bg-gray-700 rounded p-4 mb-4">
+						<p class="text-sm text-gray-600 dark:text-gray-400 mb-2"><strong>Archivo:</strong></p>
+						<ul class="list-disc list-inside text-sm text-gray-700 dark:text-gray-300 space-y-1">
+							<li><code class="bg-gray-200 dark:bg-gray-600 px-2 py-1 rounded">news_service_facade.py</code> - Simplifica operaciones de noticias (BD, Firebase, Cache)</li>
+						</ul>
+					</div>
+					<div class="bg-purple-50 dark:bg-purple-900/20 rounded p-4">
+						<p class="text-sm font-semibold text-purple-900 dark:text-purple-200 mb-2">Ejemplo de uso:</p>
+						<pre class="text-xs text-gray-800 dark:text-gray-200 overflow-x-auto"><code># Una sola llamada maneja: BD, Firebase, Cache
+noticia = news_facade.get_news_by_id(id)
+news_facade.create_news(data)  # Guarda en BD, sube imagen a Firebase, invalida cache</code></pre>
+					</div>
+				</div>
+
+				<!-- Decorator Pattern -->
+				<div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 mb-6">
+					<div class="flex items-center justify-between mb-4">
+						<h3 class="text-2xl font-bold text-orange-600 dark:text-orange-400">4. Decorator Pattern</h3>
+						<span class="px-3 py-1 bg-orange-100 dark:bg-orange-900 text-orange-800 dark:text-orange-200 rounded-full text-sm font-semibold">Estructural</span>
+					</div>
+					<p class="text-gray-700 dark:text-gray-300 mb-4">
+						<strong>Propósito:</strong> Agregar funcionalidad adicional a objetos de forma dinámica.
+					</p>
+					<div class="bg-gray-50 dark:bg-gray-700 rounded p-4 mb-4">
+						<p class="text-sm text-gray-600 dark:text-gray-400 mb-2"><strong>Archivo:</strong></p>
+						<ul class="list-disc list-inside text-sm text-gray-700 dark:text-gray-300 space-y-1">
+							<li><code class="bg-gray-200 dark:bg-gray-600 px-2 py-1 rounded">decorators.py</code> - LoggingDecorator, RetryDecorator, CacheDecorator</li>
+						</ul>
+					</div>
+					<div class="bg-orange-50 dark:bg-orange-900/20 rounded p-4">
+						<p class="text-sm font-semibold text-orange-900 dark:text-orange-200 mb-2">Ejemplo de uso:</p>
+						<pre class="text-xs text-gray-800 dark:text-gray-200 overflow-x-auto"><code>@LoggingDecorator.log_operation("Crear noticia")
+@RetryDecorator.retry_on_failure(max_retries=3)
+def create_news():
+    # Código de creación
+    pass</code></pre>
+					</div>
+				</div>
+
+				<!-- Observer Pattern -->
+				<div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 mb-6">
+					<div class="flex items-center justify-between mb-4">
+						<h3 class="text-2xl font-bold text-red-600 dark:text-red-400">5. Observer Pattern</h3>
+						<span class="px-3 py-1 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 rounded-full text-sm font-semibold">Comportamiento</span>
+					</div>
+					<p class="text-gray-700 dark:text-gray-300 mb-4">
+						<strong>Propósito:</strong> Definir una dependencia uno-a-muchos entre objetos, de modo que cuando un objeto cambia, todos sus dependientes sean notificados.
+					</p>
+					<div class="bg-gray-50 dark:bg-gray-700 rounded p-4 mb-4">
+						<p class="text-sm text-gray-600 dark:text-gray-400 mb-2"><strong>Archivo:</strong></p>
+						<ul class="list-disc list-inside text-sm text-gray-700 dark:text-gray-300 space-y-1">
+							<li><code class="bg-gray-200 dark:bg-gray-600 px-2 py-1 rounded">observer_pattern.py</code> - NewsEventSubject, AuthEventSubject</li>
+						</ul>
+					</div>
+					<div class="bg-red-50 dark:bg-red-900/20 rounded p-4 mb-4">
+						<p class="text-sm font-semibold text-red-900 dark:text-red-200 mb-2">Observers implementados:</p>
+						<ul class="list-disc list-inside text-sm text-gray-700 dark:text-gray-300 space-y-1">
+							<li><strong>CacheInvalidationObserver</strong> - Invalida cache cuando hay cambios</li>
+							<li><strong>LoggingObserver</strong> - Registra eventos en logs</li>
+							<li><strong>NotificationObserver</strong> - Genera notificaciones</li>
+						</ul>
+					</div>
+					<div class="bg-red-50 dark:bg-red-900/20 rounded p-4">
+						<p class="text-sm font-semibold text-red-900 dark:text-red-200 mb-2">Ejemplo de uso:</p>
+						<pre class="text-xs text-gray-800 dark:text-gray-200 overflow-x-auto"><code># Cuando se crea una noticia, se notifica a todos los observers
+news_event_subject.news_created(noticia_data)
+# → CacheInvalidationObserver invalida cache
+# → LoggingObserver registra el evento
+# → NotificationObserver crea notificación</code></pre>
+					</div>
+				</div>
+
+				<!-- Mediator Pattern -->
+				<div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 mb-6">
+					<div class="flex items-center justify-between mb-4">
+						<h3 class="text-2xl font-bold text-indigo-600 dark:text-indigo-400">6. Mediator Pattern</h3>
+						<span class="px-3 py-1 bg-indigo-100 dark:bg-indigo-900 text-indigo-800 dark:text-indigo-200 rounded-full text-sm font-semibold">Comportamiento</span>
+					</div>
+					<p class="text-gray-700 dark:text-gray-300 mb-4">
+						<strong>Propósito:</strong> Definir un objeto que encapsula cómo un conjunto de objetos interactúan, promoviendo el acoplamiento débil.
+					</p>
+					<div class="bg-gray-50 dark:bg-gray-700 rounded p-4 mb-4">
+						<p class="text-sm text-gray-600 dark:text-gray-400 mb-2"><strong>Archivo:</strong></p>
+						<ul class="list-disc list-inside text-sm text-gray-700 dark:text-gray-300 space-y-1">
+							<li><code class="bg-gray-200 dark:bg-gray-600 px-2 py-1 rounded">mediator_pattern.py</code> - NewsServiceMediator</li>
+						</ul>
+					</div>
+					<div class="bg-indigo-50 dark:bg-indigo-900/20 rounded p-4 mb-4">
+						<p class="text-sm font-semibold text-indigo-900 dark:text-indigo-200 mb-2">Componentes:</p>
+						<ul class="list-disc list-inside text-sm text-gray-700 dark:text-gray-300 space-y-1">
+							<li><strong>LoggingService</strong> - Maneja logging</li>
+							<li><strong>NotificationService</strong> - Maneja notificaciones</li>
+						</ul>
+					</div>
+					<div class="bg-indigo-50 dark:bg-indigo-900/20 rounded p-4">
+						<p class="text-sm font-semibold text-indigo-900 dark:text-indigo-200 mb-2">Ejemplo de uso:</p>
+						<pre class="text-xs text-gray-800 dark:text-gray-200 overflow-x-auto"><code># El mediador coordina entre servicios
+mediator.create_news(data)
+# → Coordina con LoggingService
+# → Coordina con NotificationService
+# → Sin que los servicios se conozcan entre sí</code></pre>
+					</div>
+				</div>
+			</section>
+
+			<!-- Frontend Patterns -->
+			<section class="mb-12">
+				<h2 class="text-3xl font-bold text-gray-900 dark:text-white mb-6 border-b-2 border-green-500 pb-2">Frontend (JavaScript/Astro)</h2>
+				
+				<!-- MVVM Pattern -->
+				<div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 mb-6">
+					<div class="flex items-center justify-between mb-4">
+						<h3 class="text-2xl font-bold text-teal-600 dark:text-teal-400">7. MVVM Pattern (Model-View-ViewModel)</h3>
+						<span class="px-3 py-1 bg-teal-100 dark:bg-teal-900 text-teal-800 dark:text-teal-200 rounded-full text-sm font-semibold">Arquitectura</span>
+					</div>
+					<p class="text-gray-700 dark:text-gray-300 mb-4">
+						<strong>Propósito:</strong> Separar la lógica de presentación de la lógica de negocio y la interfaz de usuario.
+					</p>
+					<div class="bg-gray-50 dark:bg-gray-700 rounded p-4 mb-4">
+						<p class="text-sm text-gray-600 dark:text-gray-400 mb-2"><strong>Archivos:</strong></p>
+						<ul class="list-disc list-inside text-sm text-gray-700 dark:text-gray-300 space-y-1">
+							<li><code class="bg-gray-200 dark:bg-gray-600 px-2 py-1 rounded">NewsModel.js</code> - Maneja datos y comunicación con API</li>
+							<li><code class="bg-gray-200 dark:bg-gray-600 px-2 py-1 rounded">NewsViewModel.js</code> - Maneja lógica de presentación y estado</li>
+							<li><code class="bg-gray-200 dark:bg-gray-600 px-2 py-1 rounded">app.js</code> - View (interfaz de usuario)</li>
+						</ul>
+					</div>
+					<div class="bg-teal-50 dark:bg-teal-900/20 rounded p-4 mb-4">
+						<p class="text-sm font-semibold text-teal-900 dark:text-teal-200 mb-2">Componentes:</p>
+						<ul class="list-disc list-inside text-sm text-gray-700 dark:text-gray-300 space-y-1">
+							<li><strong>Model (NewsModel.js)</strong> - Obtiene datos del backend, no conoce la UI</li>
+							<li><strong>ViewModel (NewsViewModel.js)</strong> - Transforma datos, maneja estado, notifica cambios</li>
+							<li><strong>View (app.js)</strong> - Muestra datos, captura interacciones del usuario</li>
+						</ul>
+					</div>
+					<div class="bg-teal-50 dark:bg-teal-900/20 rounded p-4">
+						<p class="text-sm font-semibold text-teal-900 dark:text-teal-200 mb-2">Flujo de datos:</p>
+						<pre class="text-xs text-gray-800 dark:text-gray-200 overflow-x-auto"><code>Usuario hace clic → View (app.js)
+  ↓
+ViewModel (NewsViewModel.js) procesa
+  ↓
+Model (NewsModel.js) obtiene datos de API
+  ↓
+ViewModel actualiza estado y notifica
+  ↓
+View se actualiza automáticamente</code></pre>
+					</div>
+				</div>
+			</section>
+
+			<!-- Resumen Visual -->
+			<section class="bg-gradient-to-r from-blue-500 to-purple-600 rounded-lg shadow-lg p-8 text-white">
+				<h2 class="text-3xl font-bold mb-6">Resumen de Patrones</h2>
+				<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+					<div class="bg-white/10 backdrop-blur rounded p-4">
+						<h3 class="font-bold mb-2">Creacionales</h3>
+						<ul class="text-sm space-y-1">
+							<li>✓ Factory Pattern</li>
+							<li>✓ Singleton Pattern</li>
+						</ul>
+					</div>
+					<div class="bg-white/10 backdrop-blur rounded p-4">
+						<h3 class="font-bold mb-2">Estructurales</h3>
+						<ul class="text-sm space-y-1">
+							<li>✓ Facade Pattern</li>
+							<li>✓ Decorator Pattern</li>
+						</ul>
+					</div>
+					<div class="bg-white/10 backdrop-blur rounded p-4">
+						<h3 class="font-bold mb-2">Comportamiento</h3>
+						<ul class="text-sm space-y-1">
+							<li>✓ Observer Pattern</li>
+							<li>✓ Mediator Pattern</li>
+						</ul>
+					</div>
+					<div class="bg-white/10 backdrop-blur rounded p-4 md:col-span-2 lg:col-span-3">
+						<h3 class="font-bold mb-2">Arquitectura</h3>
+						<ul class="text-sm space-y-1">
+							<li>✓ MVVM Pattern (Model-View-ViewModel)</li>
+						</ul>
+					</div>
+				</div>
+			</section>
+
+			<!-- Cómo ver los patrones en acción -->
+			<section class="mt-12 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg p-6 border-2 border-yellow-400">
+				<h2 class="text-2xl font-bold text-yellow-900 dark:text-yellow-200 mb-4">Cómo ver los patrones en acción</h2>
+				<div class="space-y-3 text-gray-700 dark:text-gray-300">
+					<div>
+						<strong class="text-yellow-900 dark:text-yellow-200">1. Factory Pattern:</strong>
+						<span>Al crear una noticia, se usa NoticiaFactory para crear el tipo correcto</span>
+					</div>
+					<div>
+						<strong class="text-yellow-900 dark:text-yellow-200">2. Singleton Pattern:</strong>
+						<span>Database() y FirebaseService() siempre devuelven la misma instancia</span>
+					</div>
+					<div>
+						<strong class="text-yellow-900 dark:text-yellow-200">3. Facade Pattern:</strong>
+						<span>news_facade.create_news() simplifica operaciones complejas (BD + Firebase + Cache)</span>
+					</div>
+					<div>
+						<strong class="text-yellow-900 dark:text-yellow-200">4. Decorator Pattern:</strong>
+						<span>Los decoradores @LoggingDecorator, @RetryDecorator agregan funcionalidad a funciones</span>
+					</div>
+					<div>
+						<strong class="text-yellow-900 dark:text-yellow-200">5. Observer Pattern:</strong>
+						<span>Al crear/editar/eliminar noticias, se notifica a CacheInvalidationObserver, LoggingObserver, etc.</span>
+					</div>
+					<div>
+						<strong class="text-yellow-900 dark:text-yellow-200">6. Mediator Pattern:</strong>
+						<span>NewsServiceMediator coordina entre LoggingService y NotificationService</span>
+					</div>
+					<div>
+						<strong class="text-yellow-900 dark:text-yellow-200">7. MVVM Pattern:</strong>
+						<span>En /noticias, NewsModel obtiene datos, NewsViewModel maneja estado, app.js muestra la UI</span>
+					</div>
+				</div>
+			</section>
+		</div>
+	</div>
+</Layout>
+

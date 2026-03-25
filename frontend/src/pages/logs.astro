@@ -1,0 +1,281 @@
+---
+import Layout from '../layouts/Layout.astro';
+---
+
+<Layout>
+	<div class="container mx-auto px-4 py-8">
+		<h1 class="text-3xl font-bold text-gray-900 dark:text-white mb-6">Registro de Acciones del Sistema</h1>
+		
+		<!-- Tabs para alternar entre registros de BD y archivo log -->
+		<div class="mb-6">
+			<div class="border-b border-gray-200 dark:border-gray-700">
+				<nav class="-mb-px flex space-x-8">
+					<button id="tab-db" class="tab-button active border-b-2 border-blue-500 py-4 px-1 text-sm font-medium text-blue-600 dark:text-blue-400">
+						Registros de Base de Datos
+					</button>
+					<button id="tab-file" class="tab-button border-b-2 border-transparent py-4 px-1 text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300">
+						Archivo de Log
+					</button>
+				</nav>
+			</div>
+		</div>
+
+		<!-- Panel de filtros (solo para registros de BD) -->
+		<div id="filters-panel" class="mb-6 bg-gray-50 dark:bg-gray-800 p-4 rounded-lg">
+			<div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+				<div>
+					<label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+						Nivel de Afectación
+					</label>
+					<select id="filter-level" class="w-full px-3 py-2 border border-gray-300 rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+						<option value="">Todos los niveles</option>
+						<option value="aviso">Avisos</option>
+						<option value="movimiento">Movimientos</option>
+						<option value="ataque">Ataques</option>
+					</select>
+				</div>
+				<div>
+					<label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+						Usuario
+					</label>
+					<input type="text" id="filter-user" placeholder="Filtrar por usuario..." 
+						class="w-full px-3 py-2 border border-gray-300 rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+				</div>
+				<div>
+					<label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+						Límite de registros
+					</label>
+					<input type="number" id="filter-limit" value="100" min="10" max="1000" step="10"
+						class="w-full px-3 py-2 border border-gray-300 rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+				</div>
+			</div>
+			<button id="apply-filters" class="mt-4 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">
+				Aplicar Filtros
+			</button>
+		</div>
+
+		<!-- Contenedor para registros de BD -->
+		<div id="db-records-panel" class="tab-panel">
+			<div class="bg-white dark:bg-gray-800 shadow rounded-lg overflow-hidden">
+				<div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+					<h2 class="text-xl font-semibold text-gray-900 dark:text-white">Registros de Acciones (Base de Datos)</h2>
+					<p id="db-total" class="text-sm text-gray-600 dark:text-gray-400 mt-1">Cargando...</p>
+				</div>
+				<div class="overflow-x-auto">
+					<table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+						<thead class="bg-gray-50 dark:bg-gray-900">
+							<tr>
+								<th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Fecha</th>
+								<th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Usuario</th>
+								<th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Acción</th>
+								<th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Nivel</th>
+								<th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Descripción</th>
+								<th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">IP</th>
+							</tr>
+						</thead>
+						<tbody id="db-records-body" class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+							<tr>
+								<td colspan="6" class="px-6 py-4 text-center text-gray-500 dark:text-gray-400">Cargando registros...</td>
+							</tr>
+						</tbody>
+					</table>
+				</div>
+			</div>
+		</div>
+
+		<!-- Contenedor para archivo de log -->
+		<div id="file-log-panel" class="tab-panel hidden">
+			<div class="bg-white dark:bg-gray-800 shadow rounded-lg overflow-hidden">
+				<div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+					<h2 class="text-xl font-semibold text-gray-900 dark:text-white">Archivo de Log de Acciones</h2>
+					<p id="file-total" class="text-sm text-gray-600 dark:text-gray-400 mt-1">Cargando...</p>
+				</div>
+				<div class="overflow-x-auto">
+					<pre id="file-log-content" class="p-6 bg-gray-900 text-green-400 font-mono text-sm overflow-x-auto max-h-96 overflow-y-auto">Cargando archivo de log...</pre>
+				</div>
+			</div>
+		</div>
+	</div>
+</Layout>
+
+<script>
+	const BACKEND_BASE_URL = '/api';
+	
+	// Estado de la aplicación
+	let currentTab = 'db';
+	let currentFilters = {
+		level: '',
+		user: '',
+		limit: 100
+	};
+
+	// Función para obtener el nivel de afectación con color
+	function getLevelBadge(level) {
+		const badges = {
+			'aviso': '<span class="px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">Aviso</span>',
+			'movimiento': '<span class="px-2 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200">Movimiento</span>',
+			'ataque': '<span class="px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200">Ataque</span>'
+		};
+		return badges[level] || `<span class="px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200">${level}</span>`;
+	}
+
+	// Función para cargar registros de BD
+	async function loadDbRecords() {
+		const body = document.getElementById('db-records-body');
+		const total = document.getElementById('db-total');
+		
+		try {
+			body.innerHTML = '<tr><td colspan="6" class="px-6 py-4 text-center text-gray-500 dark:text-gray-400">Cargando registros...</td></tr>';
+			
+			const params = new URLSearchParams({
+				limit: currentFilters.limit || 100,
+				offset: 0
+			});
+			
+			if (currentFilters.level) {
+				params.append('nivel', currentFilters.level);
+			}
+			if (currentFilters.user) {
+				params.append('usuario', currentFilters.user);
+			}
+			
+			const response = await fetch(`${BACKEND_BASE_URL}/actions?${params}`, {
+				credentials: 'include'
+			});
+			
+			if (!response.ok) {
+				throw new Error(`Error ${response.status}: ${response.statusText}`);
+			}
+			
+			const data = await response.json();
+			
+			if (data.actions && data.actions.length > 0) {
+				total.textContent = `Total: ${data.total} registros | Mostrando: ${data.actions.length}`;
+				
+				body.innerHTML = data.actions.map(action => `
+					<tr class="hover:bg-gray-50 dark:hover:bg-gray-700">
+						<td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">${action.fecha || 'N/A'}</td>
+						<td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-gray-100">${action.usuario || 'N/A'}</td>
+						<td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">${action.accion || 'N/A'}</td>
+						<td class="px-6 py-4 whitespace-nowrap text-sm">${getLevelBadge(action.nivel || 'movimiento')}</td>
+						<td class="px-6 py-4 text-sm text-gray-900 dark:text-gray-100">${action.descripcion || 'Sin descripción'}</td>
+						<td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">${action.ip || 'N/A'}</td>
+					</tr>
+				`).join('');
+			} else {
+				total.textContent = 'No hay registros disponibles';
+				body.innerHTML = '<tr><td colspan="6" class="px-6 py-4 text-center text-gray-500 dark:text-gray-400">No se encontraron registros</td></tr>';
+			}
+		} catch (error) {
+			console.error('Error al cargar registros:', error);
+			total.textContent = 'Error al cargar registros';
+			body.innerHTML = `<tr><td colspan="6" class="px-6 py-4 text-center text-red-500">Error: ${error.message}</td></tr>`;
+		}
+	}
+
+	// Función para cargar archivo de log
+	async function loadFileLog() {
+		const content = document.getElementById('file-log-content');
+		const total = document.getElementById('file-total');
+		
+		try {
+			content.textContent = 'Cargando archivo de log...';
+			
+			const response = await fetch(`${BACKEND_BASE_URL}/logs/actions?limit=500`, {
+				credentials: 'include'
+			});
+			
+			if (!response.ok) {
+				throw new Error(`Error ${response.status}: ${response.statusText}`);
+			}
+			
+			const data = await response.json();
+			
+			if (data.logs && data.logs.length > 0) {
+				total.textContent = `Total: ${data.total_lines} líneas | Mostrando: ${data.returned_lines} últimas líneas`;
+				content.textContent = data.logs.map(log => log.line).join('\n');
+			} else {
+				total.textContent = data.message || 'No hay logs disponibles';
+				content.textContent = data.message || 'El archivo de log está vacío o no existe';
+			}
+		} catch (error) {
+			console.error('Error al cargar archivo de log:', error);
+			total.textContent = 'Error al cargar archivo de log';
+			content.textContent = `Error: ${error.message}`;
+		}
+	}
+
+	// Función para cambiar de tab
+	function switchTab(tab) {
+		currentTab = tab;
+		
+		// Actualizar botones
+		document.querySelectorAll('.tab-button').forEach(btn => {
+			btn.classList.remove('active', 'border-blue-500', 'text-blue-600', 'dark:text-blue-400');
+			btn.classList.add('border-transparent', 'text-gray-500', 'dark:text-gray-400');
+		});
+		
+		if (tab === 'db') {
+			document.getElementById('tab-db').classList.add('active', 'border-blue-500', 'text-blue-600', 'dark:text-blue-400');
+			document.getElementById('tab-db').classList.remove('border-transparent', 'text-gray-500', 'dark:text-gray-400');
+			document.getElementById('db-records-panel').classList.remove('hidden');
+			document.getElementById('file-log-panel').classList.add('hidden');
+			document.getElementById('filters-panel').classList.remove('hidden');
+		} else {
+			document.getElementById('tab-file').classList.add('active', 'border-blue-500', 'text-blue-600', 'dark:text-blue-400');
+			document.getElementById('tab-file').classList.remove('border-transparent', 'text-gray-500', 'dark:text-gray-400');
+			document.getElementById('db-records-panel').classList.add('hidden');
+			document.getElementById('file-log-panel').classList.remove('hidden');
+			document.getElementById('filters-panel').classList.add('hidden');
+		}
+	}
+
+	// Inicializar cuando el DOM esté listo
+	document.addEventListener('DOMContentLoaded', () => {
+		// Event listeners para tabs
+		document.getElementById('tab-db').addEventListener('click', () => {
+			switchTab('db');
+			loadDbRecords();
+		});
+		
+		document.getElementById('tab-file').addEventListener('click', () => {
+			switchTab('file');
+			loadFileLog();
+		});
+		
+		// Event listener para filtros
+		document.getElementById('apply-filters').addEventListener('click', () => {
+			currentFilters.level = document.getElementById('filter-level').value;
+			currentFilters.user = document.getElementById('filter-user').value;
+			currentFilters.limit = parseInt(document.getElementById('filter-limit').value) || 100;
+			loadDbRecords();
+		});
+		
+		// Cargar registros iniciales
+		loadDbRecords();
+	});
+</script>
+
+<style>
+	.tab-button {
+		cursor: pointer;
+		transition: all 0.2s;
+	}
+	
+	.tab-button:hover {
+		border-color: #9ca3af;
+	}
+	
+	.tab-panel {
+		animation: fadeIn 0.3s;
+	}
+	
+	@keyframes fadeIn {
+		from {
+			opacity: 0;
+		}
+		to {
+			opacity: 1;
+		}
+	}
+</style>

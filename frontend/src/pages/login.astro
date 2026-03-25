@@ -1,0 +1,68 @@
+---
+import Layout from '../layouts/Layout.astro';
+---
+
+<Layout>
+	<!-- Contenedor principal para la SPA -->
+	<div id="app-container">
+		<!-- El contenido se cargará dinámicamente aquí -->
+		<section class="mb-12 text-center">
+			<h1 class="text-3xl font-bold text-gray-900 dark:text-white mb-4">Noticias Universitarias</h1>
+			<p class="text-gray-600 dark:text-gray-400 mb-6">Bienvenido al sistema de noticias universitarias</p>
+			<p class="text-gray-500 dark:text-gray-500 text-sm">Cargando aplicación...</p>
+		</section>
+	</div>
+</Layout>
+
+<!-- Router del lado del cliente y aplicación SPA -->
+<script>
+	// Cargar scripts en orden secuencial
+	(function() {
+		let currentIndex = 0;
+		const scripts = [
+			'/src/models/NewsModel.js',
+			'/src/viewmodels/NewsViewModel.js',
+			'/src/utils/router.js',
+			'/src/app.js'
+		];
+		
+		function loadNextScript() {
+			if (currentIndex >= scripts.length) {
+				// Todos los scripts cargados, inicializar la app
+				if (typeof initApp === 'function') {
+					initApp();
+				} else {
+					// Esperar un poco más si initApp aún no está disponible
+					setTimeout(() => {
+						if (typeof initApp === 'function') {
+							initApp();
+						} else {
+							console.error('initApp no está disponible');
+						}
+					}, 100);
+				}
+				return;
+			}
+			
+			const script = document.createElement('script');
+			script.src = scripts[currentIndex];
+			script.onload = () => {
+				currentIndex++;
+				loadNextScript();
+			};
+			script.onerror = () => {
+				console.error('Error al cargar script:', scripts[currentIndex]);
+				currentIndex++;
+				loadNextScript();
+			};
+			document.body.appendChild(script);
+		}
+		
+		// Iniciar carga cuando el DOM esté listo
+		if (document.readyState === 'loading') {
+			document.addEventListener('DOMContentLoaded', loadNextScript);
+		} else {
+			loadNextScript();
+		}
+	})();
+</script>
