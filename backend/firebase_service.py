@@ -9,6 +9,14 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+GS_URI_PREFIX = "gs://"
+
+def _normalize_storage_bucket_name(raw_bucket: str) -> str:
+    if raw_bucket.startswith(GS_URI_PREFIX):
+        return raw_bucket[len(GS_URI_PREFIX):]
+    return raw_bucket
+
+
 class FirebaseService:
     """Clase singleton para manejar Firebase Storage"""
     
@@ -35,11 +43,7 @@ class FirebaseService:
             # Inicializar Firebase Admin
             cred = credentials.Certificate(Config.FIREBASE_CREDENTIALS_PATH)
             
-            # Configurar el bucket específico (sin prefijo gs:// para la inicialización)
-            storage_bucket = Config.FIREBASE_STORAGE_BUCKET
-            # Remover prefijo gs:// si existe (para la inicialización)
-            if storage_bucket.startswith('gs://'):
-                storage_bucket = storage_bucket[5:]  # Remover 'gs://'
+            storage_bucket = _normalize_storage_bucket_name(Config.FIREBASE_STORAGE_BUCKET)
             
             firebase_admin.initialize_app(cred, {
                 'storageBucket': storage_bucket
@@ -67,17 +71,9 @@ class FirebaseService:
             return None
         
         try:
-            # Usar el bucket específico configurado (sin prefijo gs://)
-            storage_bucket = Config.FIREBASE_STORAGE_BUCKET
-            # Remover prefijo gs:// si existe
-            if storage_bucket.startswith('gs://'):
-                storage_bucket = storage_bucket[5:]  # Remover 'gs://'
-            
-            # Obtener el bucket específico (sin prefijo gs://)
+            storage_bucket = _normalize_storage_bucket_name(Config.FIREBASE_STORAGE_BUCKET)
             bucket = storage.bucket(storage_bucket)
             blob = bucket.blob(destination_path)
-            
-            # Subir archivo
             blob.upload_from_filename(file_path)
             
             # Hacer público el archivo
@@ -109,13 +105,7 @@ class FirebaseService:
             return None
         
         try:
-            # Usar el bucket específico configurado (sin prefijo gs://)
-            storage_bucket = Config.FIREBASE_STORAGE_BUCKET
-            # Remover prefijo gs:// si existe
-            if storage_bucket.startswith('gs://'):
-                storage_bucket = storage_bucket[5:]  # Remover 'gs://'
-            
-            # Obtener el bucket específico (sin prefijo gs://)
+            storage_bucket = _normalize_storage_bucket_name(Config.FIREBASE_STORAGE_BUCKET)
             bucket = storage.bucket(storage_bucket)
             blob = bucket.blob(destination_path)
             
@@ -146,13 +136,7 @@ class FirebaseService:
             return False
         
         try:
-            # Usar el bucket específico configurado (sin prefijo gs://)
-            storage_bucket = Config.FIREBASE_STORAGE_BUCKET
-            # Remover prefijo gs:// si existe
-            if storage_bucket.startswith('gs://'):
-                storage_bucket = storage_bucket[5:]  # Remover 'gs://'
-            
-            # Obtener el bucket específico (sin prefijo gs://)
+            storage_bucket = _normalize_storage_bucket_name(Config.FIREBASE_STORAGE_BUCKET)
             bucket = storage.bucket(storage_bucket)
             blob = bucket.blob(destination_path)
             blob.delete()
@@ -176,13 +160,7 @@ class FirebaseService:
             return None
         
         try:
-            # Usar el bucket específico configurado (sin prefijo gs://)
-            storage_bucket = Config.FIREBASE_STORAGE_BUCKET
-            # Remover prefijo gs:// si existe
-            if storage_bucket.startswith('gs://'):
-                storage_bucket = storage_bucket[5:]  # Remover 'gs://'
-            
-            # Obtener el bucket específico (sin prefijo gs://)
+            storage_bucket = _normalize_storage_bucket_name(Config.FIREBASE_STORAGE_BUCKET)
             bucket = storage.bucket(storage_bucket)
             blob = bucket.blob(destination_path)
             

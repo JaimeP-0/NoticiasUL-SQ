@@ -18,7 +18,8 @@ class Config:
     MYSQL_HOST = os.getenv('MYSQL_HOST', '82.180.138.204')
     MYSQL_PORT = int(os.getenv('MYSQL_PORT', 3306))
     MYSQL_USER = os.getenv('MYSQL_USER', 'u489282276_jaime')
-    MYSQL_PASSWORD = os.getenv('MYSQL_PASSWORD', 'Noticias_1')
+    # Sin contraseña por defecto en código: definir MYSQL_PASSWORD en .env
+    MYSQL_PASSWORD = os.getenv('MYSQL_PASSWORD', '')
     MYSQL_DATABASE = os.getenv('MYSQL_DATABASE', 'u489282276_noticiasul')
     
     # Firebase

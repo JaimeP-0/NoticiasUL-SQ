@@ -31,8 +31,8 @@ export default defineConfig({
 								const cookies = proxyRes.headers['set-cookie'].map(cookie => {
 									// Remover el dominio específico para que funcione en localhost:4321
 									return cookie
-										.replace(/Domain=[^;]+;?/gi, '')
-										.replace(/;?\s*Domain=[^;]+/gi, '');
+										.replaceAll(/Domain=[^;]+;?/gi, '')
+										.replaceAll(/;?\s*Domain=[^;]+/gi, '');
 								});
 								res.setHeader('Set-Cookie', cookies);
 							}

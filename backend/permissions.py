@@ -69,7 +69,7 @@ def has_permission(role, permission):
         bool: True si el rol tiene el permiso, False en caso contrario
     """
     if role not in ROLE_PERMISSIONS:
-        logger.warning(f"Rol desconocido: {role}. Tratando como 'usuario'")
+        logger.warning("Rol desconocido en permisos; se usa rol 'usuario' por defecto")
         role = 'usuario'
     
     return ROLE_PERMISSIONS.get(role, {}).get(permission, False)
@@ -95,7 +95,7 @@ def require_permission(permission):
             
             # Verificar si el usuario tiene el permiso
             if not has_permission(user_role, permission):
-                logger.warning(f"Acceso denegado: Usuario con rol '{user_role}' intentó acceder a endpoint que requiere '{permission}'")
+                logger.warning("Acceso denegado: permiso insuficiente para el recurso solicitado")
                 return jsonify({
                     "error": "No tienes permisos para realizar esta acción",
                     "required_permission": permission,
@@ -125,7 +125,7 @@ def require_role(*allowed_roles):
             user_role = get_user_role_from_request()
             
             if user_role not in allowed_roles:
-                logger.warning(f"Acceso denegado: Usuario con rol '{user_role}' intentó acceder a endpoint que requiere roles: {allowed_roles}")
+                logger.warning("Acceso denegado: rol no autorizado para el recurso solicitado")
                 return jsonify({
                     "error": "No tienes permisos para acceder a este recurso",
                     "required_roles": list(allowed_roles),

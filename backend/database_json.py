@@ -12,6 +12,10 @@ import re
 
 logger = logging.getLogger(__name__)
 
+# Operador SQL en mayúsculas para parseo WHERE (espacios explícitos)
+SQL_LIKE_TOKEN = " LIKE "
+SQL_IN_TOKEN = " IN "
+
 class DatabaseJSON:
     """
     Clase singleton para manejar la base de datos usando JSON
@@ -145,7 +149,6 @@ class DatabaseJSON:
                     fields = []
                     field_aliases = {}  # Mapear alias a campo real
                     for f in fields_str.split(','):
-                        original_field = f.strip()
                         f = f.strip()
                         # Remover backticks y comillas
                         f = f.strip('`"')
@@ -230,7 +233,11 @@ class DatabaseJSON:
                 result["table"] = from_match.group(1)
             
             # Extraer WHERE
-            where_match = re.search(r'WHERE\s+(.*?)(?:\s+ORDER\s+BY|\s+LIMIT|$)', query, re.IGNORECASE)
+            where_match = re.search(
+                r'WHERE\s+(.+?)(?=\s+ORDER\s+BY|\s+LIMIT\b|$)',
+                query,
+                re.IGNORECASE | re.DOTALL,
+            )
             if where_match:
                 where_clause = where_match.group(1).strip()
                 result["where"] = self._parse_where_clause(where_clause, params)
@@ -282,7 +289,11 @@ class DatabaseJSON:
                 result["table"] = update_match.group(1)
             
             # Extraer SET
-            set_match = re.search(r'SET\s+(.*?)(?:\s+WHERE|$)', query, re.IGNORECASE)
+            set_match = re.search(
+                r'SET\s+(.+?)(?=\s+WHERE\b|$)',
+                query,
+                re.IGNORECASE | re.DOTALL,
+            )
             if set_match:
                 set_clause = set_match.group(1).strip()
                 # Parsear SET campo = valor
@@ -293,7 +304,7 @@ class DatabaseJSON:
                         result["set_fields"][field.strip()] = value.strip().strip("'\"")
             
             # Extraer WHERE
-            where_match = re.search(r'WHERE\s+(.*?)$', query, re.IGNORECASE)
+            where_match = re.search(r'WHERE\s+(.+)$', query, re.IGNORECASE | re.DOTALL)
             if where_match:
                 where_clause = where_match.group(1).strip()
                 result["where"] = self._parse_where_clause(where_clause, params)
@@ -306,7 +317,7 @@ class DatabaseJSON:
                 result["table"] = delete_match.group(1)
             
             # Extraer WHERE
-            where_match = re.search(r'WHERE\s+(.*?)$', query, re.IGNORECASE)
+            where_match = re.search(r'WHERE\s+(.+)$', query, re.IGNORECASE | re.DOTALL)
             if where_match:
                 where_clause = where_match.group(1).strip()
                 result["where"] = self._parse_where_clause(where_clause, params)
@@ -323,15 +334,15 @@ class DatabaseJSON:
         for part in and_parts:
             part = part.strip()
             # Buscar operadores: =, !=, <, >, <=, >=, LIKE, IN
-            for op in ['!=', '<=', '>=', '=', '<', '>', ' LIKE ', ' IN ']:
+            for op in ['!=', '<=', '>=', '=', '<', '>', SQL_LIKE_TOKEN, SQL_IN_TOKEN]:
                 op_clean = op.strip()
                 if op_clean in part.upper() or op in part:
                     # Encontrar la posición del operador
-                    if op_clean == ' LIKE ':
-                        op_pos = part.upper().find(' LIKE ')
+                    if op == SQL_LIKE_TOKEN:
+                        op_pos = part.upper().find(SQL_LIKE_TOKEN.upper())
                         op_used = 'LIKE'
-                    elif op_clean == ' IN ':
-                        op_pos = part.upper().find(' IN ')
+                    elif op == SQL_IN_TOKEN:
+                        op_pos = part.upper().find(SQL_IN_TOKEN.upper())
                         op_used = 'IN'
                     else:
                         op_pos = part.find(op)
@@ -701,7 +712,7 @@ class DatabaseJSON:
             logger.error(f"Error al inicializar tablas JSON: {e}")
             return False
     
-    def get_connection(self, use_pool=True):
+    def get_connection(self):
         """Método de compatibilidad - retorna self para simular conexión"""
         return self
     
@@ -722,7 +733,10 @@ class DatabaseJSON:
                 # FROM noticias_nul n LEFT JOIN usuarios_nul u ON n.autor = u.usuario WHERE n.id = %s
                 # FROM categorias_nul c JOIN noticias_categorias nc ON c.id = nc.categoria_id WHERE nc.noticia_id = %s
                 # Capturar hasta WHERE, ORDER BY, LIMIT o el final
-                join_pattern = r'FROM\s+(\w+)\s+\w+\s+(?:LEFT\s+)?JOIN\s+(\w+)\s+\w+\s+ON\s+(.+?)(?:\s+WHERE|\s+ORDER\s+BY|\s+LIMIT|$)'
+                join_pattern = (
+                    r'FROM\s+(\w+)\s+\w+\s+(?:LEFT\s+)?JOIN\s+(\w+)\s+\w+\s+ON\s+'
+                    r'(.+)(?=\s+WHERE\b|\s+ORDER\s+BY\b|\s+LIMIT\b|$)'
+                )
                 join_match = re.search(join_pattern, query, re.IGNORECASE)
                 if join_match:
                     logger.debug(f"[JOIN] Match encontrado: main_table={join_match.group(1)}, join_table={join_match.group(2)}, is_left={is_left_join}")
@@ -838,10 +852,10 @@ class DatabaseJSON:
                         logger.debug(f"[JOIN] Retornando {len(result)} registros finales")
                         return result
                 else:
-                    logger.warning(f"[JOIN] No se pudo hacer match del JOIN en la consulta: {query[:100]}")
+                    logger.warning("[JOIN] No se pudo analizar la cláusula JOIN de la consulta")
             
             # Si no se puede procesar, retornar vacío
-            logger.warning(f"[JOIN] No se detectó JOIN en la consulta")
+            logger.warning("[JOIN] No se detectó JOIN en la consulta")
             return []
         except Exception as e:
             logger.error(f"Error al procesar JOIN: {e}")

@@ -61,10 +61,9 @@ class Database:
                 connection = pool.get_connection()
                 return connection
             except pooling.PoolError:
-                # Reintentar una vez sin delay
                 try:
                     return pool.get_connection()
-                except:
+                except pooling.PoolError:
                     raise
             except Error as e:
                 logger.error(f"Error al obtener conexión del pool: {e}")
@@ -114,7 +113,7 @@ class Database:
                     result = None
                 try:
                     cursor.fetchall()
-                except:
+                except Error:
                     pass
             
             if not connection.autocommit:
@@ -126,14 +125,14 @@ class Database:
             if connection and not connection.autocommit:
                 try:
                     connection.rollback()
-                except:
+                except Error:
                     pass
             raise
         finally:
             if cursor:
                 try:
                     cursor.close()
-                except:
+                except Error:
                     pass
             if connection:
                 try:
@@ -165,7 +164,7 @@ class Database:
                 # Consumir cualquier resultado pendiente para evitar "Unread result found"
                 try:
                     cursor.fetchall()
-                except:
+                except Error:
                     pass
             
             if not connection.autocommit:
@@ -177,7 +176,7 @@ class Database:
             if connection and not connection.autocommit:
                 try:
                     connection.rollback()
-                except:
+                except Error:
                     pass
             raise
         finally:
@@ -185,7 +184,7 @@ class Database:
             if cursor:
                 try:
                     cursor.close()
-                except:
+                except Error:
                     pass
             # Devolver la conexión al pool (siempre cerrar, incluso si hay error)
             if connection:
@@ -201,7 +200,7 @@ class Database:
             # Verificar si la tabla usuarios_nul existe y tiene la estructura correcta
             try:
                 self.execute_query("SELECT idUsuario, usuario, contrasena FROM usuarios_nul LIMIT 1", fetch_one=True)
-            except:
+            except Error:
                 # Crear tabla de usuarios_nul solo si no existe
                 self.execute_query("""
                     CREATE TABLE IF NOT EXISTS usuarios_nul (
@@ -218,7 +217,7 @@ class Database:
             # Crear tabla de noticias_nul (sin clave foránea para compatibilidad)
             try:
                 self.execute_query("SELECT id FROM noticias_nul LIMIT 1", fetch_one=True)
-            except:
+            except Error:
                 # Crear tabla de noticias_nul sin clave foránea para evitar problemas
                 self.execute_query("""
                     CREATE TABLE IF NOT EXISTS noticias_nul (
@@ -238,7 +237,7 @@ class Database:
             # Crear tabla de acciones de usuarios si no existe
             try:
                 self.execute_query("SELECT id FROM acciones_usuarios LIMIT 1", fetch_one=True)
-            except:
+            except Error:
                 # Crear tabla de acciones de usuarios
                 self.execute_query("""
                     CREATE TABLE IF NOT EXISTS acciones_usuarios (
@@ -283,7 +282,7 @@ class Database:
                                 INSERT INTO usuarios_nul (usuario, contrasena, nombre, rol)
                                 VALUES (%s, %s, %s, %s)
                             """, ('admin', '1234', 'Administrador', 'admin'))
-                    except:
+                    except Error:
                         pass
             except Exception as e:
                 logger.warning(f"No se pudo crear usuario admin: {e}")

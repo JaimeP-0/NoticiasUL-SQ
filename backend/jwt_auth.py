@@ -2,7 +2,7 @@
 Módulo para manejar autenticación JWT
 """
 import jwt
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 from flask import request, jsonify
 from config import Config
@@ -28,13 +28,14 @@ def generate_token(user_id, usuario, rol, nombre=None):
     Returns:
         str: Token JWT codificado
     """
+    now = datetime.now(timezone.utc)
     payload = {
         'user_id': user_id,
         'usuario': usuario,
         'rol': rol,
         'nombre': nombre,
-        'exp': datetime.utcnow() + timedelta(hours=JWT_EXPIRATION_HOURS),
-        'iat': datetime.utcnow()
+        'exp': now + timedelta(hours=JWT_EXPIRATION_HOURS),
+        'iat': now
     }
     
     token = jwt.encode(payload, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
@@ -78,16 +79,15 @@ def get_token_from_request():
                 return token
             except IndexError:
                 logger.warning("[JWT] Formato incorrecto en header Authorization")
-                pass
+                # Continuar y probar la cookie auth_token
         
         # Si no está en el header, intentar desde la cookie (para navegador)
         token = request.cookies.get('auth_token')
         if token:
             logger.info("[JWT] Token obtenido desde cookie")
             return token
-        else:
-            logger.warning("[JWT] No se encontró token en cookie 'auth_token'")
-            logger.info(f"[JWT] Cookies disponibles: {list(request.cookies.keys())}")
+        logger.warning("[JWT] No se encontró token en cookie 'auth_token'")
+        logger.info("[JWT] Petición sin token en cookie (número de cookies: %s)", len(request.cookies))
         
         return None
     except Exception as e:
@@ -146,17 +146,20 @@ def get_user_from_token():
     try:
         token = get_token_from_request()
         if token:
-            logger.info(f"[JWT] Verificando token...")
+            logger.info("[JWT] Verificando token")
             payload = verify_token(token)
             if payload:
-                logger.info(f"[JWT] Token payload: {payload}")
                 user_info = {
                     'user_id': payload.get('user_id'),
                     'usuario': payload.get('usuario'),
                     'rol': payload.get('rol'),
                     'nombre': payload.get('nombre')
                 }
-                logger.info(f"[JWT] User info extraído: {user_info}")
+                logger.info(
+                    "[JWT] Token válido (user_id=%s, rol=%s)",
+                    user_info.get('user_id'),
+                    user_info.get('rol'),
+                )
                 return user_info
             else:
                 logger.warning("[JWT] Token inválido o expirado")

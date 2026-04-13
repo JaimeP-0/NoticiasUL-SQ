@@ -83,6 +83,34 @@ class RetryDecorator:
     """
     
     @staticmethod
+    def _run_with_retries(func: Callable, max_retries: int, delay: float,
+                          exceptions: tuple, args: tuple, kwargs: dict) -> Any:
+        last_exception = None
+        for attempt in range(max_retries + 1):
+            try:
+                if attempt > 0:
+                    logger.info(
+                        "🔄 [RETRY] Reintentando %s (intento %s/%s)",
+                        func.__name__,
+                        attempt + 1,
+                        max_retries + 1,
+                    )
+                    time.sleep(delay * attempt)
+                result = func(*args, **kwargs)
+                if attempt > 0:
+                    logger.info("✅ [RETRY] Operación exitosa después de %s intentos", attempt + 1)
+                return result
+            except exceptions as e:
+                last_exception = e
+                logger.warning("⚠️ [RETRY] Intento %s falló: %s", attempt + 1, type(e).__name__)
+                if attempt == max_retries:
+                    logger.error("❌ [RETRY] Todos los reintentos fallaron para %s", func.__name__)
+                    raise
+        if last_exception:
+            raise last_exception
+        return None
+
+    @staticmethod
     def retry_on_failure(max_retries: int = 3, delay: float = 1.0, 
                          exceptions: tuple = (Exception,)):
         """
@@ -96,32 +124,9 @@ class RetryDecorator:
         def decorator(func: Callable) -> Callable:
             @functools.wraps(func)
             def wrapper(*args, **kwargs):
-                last_exception = None
-                
-                for attempt in range(max_retries + 1):
-                    try:
-                        if attempt > 0:
-                            logger.info(f"🔄 [RETRY] Reintentando {func.__name__} (Intento {attempt + 1}/{max_retries + 1})")
-                            time.sleep(delay * attempt)  # Backoff exponencial
-                        
-                        result = func(*args, **kwargs)
-                        
-                        if attempt > 0:
-                            logger.info(f"✅ [RETRY] Operación exitosa después de {attempt + 1} intentos")
-                        
-                        return result
-                    except exceptions as e:
-                        last_exception = e
-                        logger.warning(f"⚠️ [RETRY] Intento {attempt + 1} falló: {str(e)}")
-                        
-                        if attempt == max_retries:
-                            logger.error(f"❌ [RETRY] Todos los reintentos fallaron para {func.__name__}")
-                            raise
-                
-                # Esto no debería ejecutarse, pero por si acaso
-                if last_exception:
-                    raise last_exception
-                
+                return RetryDecorator._run_with_retries(
+                    func, max_retries, delay, exceptions, args, kwargs
+                )
             return wrapper
         return decorator
 

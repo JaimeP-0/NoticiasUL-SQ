@@ -15,6 +15,15 @@ from cache import cache
 from news_service_facade import NewsServiceFacade
 from decorators import LoggingDecorator
 from action_logger import action_logger, NIVELES_AFECTACION
+from app_constants import (
+    TRYCLOUDFLARE_DOMAIN,
+    TRYCLOUDFLARE_HOST_SUFFIX,
+    HTTPS_PREFIX,
+    MSG_USER_PASSWORD_REQUIRED,
+    MSG_JSON_DB_ONLY,
+    DATABASE_JSON_BASENAME,
+    DEFAULT_NEWS_TITLE,
+)
 # Intentar importar Flask-Limiter para rate limiting
 try:
     from flask_limiter import Limiter
@@ -52,11 +61,9 @@ class SafeTimedRotatingFileHandler(TimedRotatingFileHandler):
         """Sobrescribir doRollover para manejar errores de permisos en Windows"""
         try:
             super().doRollover()
-        except (OSError, PermissionError) as e:
-            # Si falla la rotación (archivo en uso por OneDrive u otro proceso),
-            # simplemente continuar sin rotar. El log seguirá escribiendo en el archivo actual.
-            # Esto es mejor que romper todo el sistema de logging.
-            pass  # Silenciosamente ignorar el error de rotación
+        except OSError:
+            # PermissionError es subclase de OSError. Si falla la rotación, continuar sin rotar.
+            pass
 
 # Configurar logging con rotación diaria
 def setup_logging():
@@ -180,7 +187,7 @@ def is_cloudflare_origin(origin):
     """Verificar si el origen es un dominio de Cloudflare Tunnel"""
     if not origin:
         return False
-    return origin.endswith('.trycloudflare.com') or 'trycloudflare.com' in origin
+    return origin.endswith(TRYCLOUDFLARE_HOST_SUFFIX) or TRYCLOUDFLARE_DOMAIN in origin
 
 # Configurar CORS con manejo dinámico de orígenes
 # Usar un decorador @app.after_request para manejar CORS manualmente para Cloudflare
@@ -213,7 +220,7 @@ def after_request_cors(response):
         response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:"
         
         # Strict Transport Security (solo en HTTPS)
-        if request.is_secure or origin.startswith('https://'):
+        if request.is_secure or (origin.startswith(HTTPS_PREFIX) if origin else False):
             response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
     except Exception as e:
         logger.error(f"Error en after_request_cors: {e}")
@@ -309,6 +316,112 @@ def send_pusher_event(channel, event, data):
         except Exception as e:
             logger.error(f"[PUSHER] Error al enviar evento: {e}")
 
+
+def _login_add_cloudflare_cors_headers(response):
+    origin = request.headers.get('Origin', '')
+    if origin and is_cloudflare_origin(origin):
+        response.headers['Access-Control-Allow-Origin'] = origin
+        response.headers['Access-Control-Allow-Credentials'] = 'true'
+    return response
+
+
+def _login_verify_password_and_migrate(user, input_password):
+    stored_password = user.get('contrasena', '')
+    if is_password_hashed(stored_password):
+        return verify_password(input_password, stored_password)
+    logger.warning("[LOGIN] Cuenta con almacenamiento de contraseña en formato legado")
+    if stored_password != input_password:
+        return False
+    try:
+        hashed_password = hash_password(input_password)
+        db.execute_query(
+            "UPDATE usuarios_nul SET contrasena = %s WHERE idUsuario = %s",
+            (hashed_password, user['idUsuario'])
+        )
+        logger.info("[LOGIN] Contraseña migrada a hash bcrypt")
+    except Exception as ex:
+        logger.error("[LOGIN] Error al migrar contraseña: %s", type(ex).__name__)
+    return True
+
+
+def _login_cookie_settings():
+    host = request.headers.get('Host', 'localhost:5000')
+    origin = request.headers.get('Origin', '')
+    hostname = host.split(':')[0] if ':' in host else host
+    is_cloudflare = TRYCLOUDFLARE_DOMAIN in hostname or TRYCLOUDFLARE_DOMAIN in origin
+    is_https = (
+        request.is_secure
+        or (origin.startswith(HTTPS_PREFIX) if origin else False)
+        or TRYCLOUDFLARE_DOMAIN in origin
+    )
+    return is_https, 'None' if is_cloudflare else 'Lax'
+
+
+def _json_db_file_path():
+    return os.path.join(os.path.dirname(__file__), DATABASE_JSON_BASENAME)
+
+
+def _json_assign_id_if_needed(data, table_name, new_record):
+    id_field = db.get_id_field(table_name) if hasattr(db, 'get_id_field') else None
+    if not id_field or id_field in new_record:
+        return
+    data.setdefault('last_ids', {})
+    data['last_ids'].setdefault(table_name, 0)
+    data['last_ids'][table_name] += 1
+    new_record[id_field] = data['last_ids'][table_name]
+
+
+def _json_set_creation_timestamps(new_record, table_name):
+    if 'fecha_creacion' not in new_record and 'fecha' not in new_record:
+        return
+    if 'fecha_creacion' not in new_record:
+        new_record['fecha_creacion'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    if 'fecha' not in new_record and table_name == 'noticias_nul':
+        new_record['fecha'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _news_query_filters(categoria_id, search):
+    where_clauses = []
+    params = []
+    if categoria_id:
+        where_clauses.append(
+            "n.id IN (SELECT noticia_id FROM noticias_categorias WHERE categoria_id = %s)"
+        )
+        params.append(categoria_id)
+    if search:
+        where_clauses.append("(n.titulo LIKE %s OR n.contenido LIKE %s OR n.autor LIKE %s)")
+        sp = f"%{search}%"
+        params.extend([sp, sp, sp])
+    return where_clauses, params
+
+
+def _news_categories_by_ids(noticia_ids):
+    if not noticia_ids:
+        return {}
+    placeholders = ','.join(['%s'] * len(noticia_ids))
+    categorias_query = f"""SELECT nc.noticia_id, c.id, c.nombre, c.color
+                          FROM noticias_categorias nc
+                          JOIN categorias_nul c ON nc.categoria_id = c.id
+                          WHERE nc.noticia_id IN ({placeholders})"""
+    rows = db.execute_query(categorias_query, tuple(noticia_ids), fetch_all=True) or []
+    by_news = {}
+    for cat in rows:
+        nid = cat['noticia_id']
+        if nid not in by_news:
+            by_news[nid] = []
+        by_news[nid].append({'id': cat['id'], 'nombre': cat['nombre'], 'color': cat['color']})
+    return by_news
+
+
+def _news_attach_meta(noticias, categorias_por_noticia):
+    for noticia in noticias:
+        if noticia.get('fecha') and not isinstance(noticia['fecha'], str):
+            noticia['fecha'] = noticia['fecha'].strftime("%Y-%m-%d %H:%M:%S")
+        if not noticia.get('imagen'):
+            noticia['imagen'] = ""
+        noticia['categorias'] = categorias_por_noticia.get(noticia['id'], [])
+
+
 @app.route('/api/register', methods=['POST'])
 def register():
     """Endpoint para registro de nuevos usuarios (solo crea usuarios con rol 'usuario')"""
@@ -320,7 +433,7 @@ def register():
         email = data.get("email", "")
         
         if not usuario or not password:
-            return jsonify({"error": "Usuario y contraseña requeridos"}), 400
+            return jsonify({"error": MSG_USER_PASSWORD_REQUIRED}), 400
         
         existing_user = db.execute_query(
             "SELECT idUsuario FROM usuarios_nul WHERE usuario = %s",
@@ -335,7 +448,7 @@ def register():
         hashed_password = hash_password(password)
         
         # Crear nuevo usuario con rol 'usuario' por defecto (siempre)
-        user_id = db.execute_query(
+        db.execute_query(
             "INSERT INTO usuarios_nul (usuario, contrasena, nombre, email, rol) VALUES (%s, %s, %s, %s, %s)",
             (usuario, hashed_password, nombre, email, 'usuario')
         )
@@ -413,10 +526,10 @@ def create_user():
         if rol not in valid_roles:
             return jsonify({"error": f"Rol inválido. Roles permitidos: {valid_roles}"}), 400
         
-        logger.info(f"Superadmin creando usuario - Usuario: {usuario}, Rol: {rol}")
+        logger.info("Superadmin creando usuario (operación administrativa)")
         
         if not usuario or not password:
-            return jsonify({"error": "Usuario y contraseña requeridos"}), 400
+            return jsonify({"error": MSG_USER_PASSWORD_REQUIRED}), 400
         
         # Verificar si el usuario ya existe
         existing_user = db.execute_query(
@@ -437,7 +550,7 @@ def create_user():
         hashed_password = hash_password(password)
         
         # Crear usuario con el rol especificado
-        user_id = db.execute_query(
+        db.execute_query(
             "INSERT INTO usuarios_nul (usuario, contrasena, nombre, email, rol) VALUES (%s, %s, %s, %s, %s)",
             (usuario, hashed_password, nombre, email, rol)
         )
@@ -588,223 +701,112 @@ def delete_user(user_id):
 @apply_rate_limit("5 per minute")
 def login():
     """Endpoint para autenticación de usuarios - usa cookies HTTP-only con rate limiting"""
-    # Manejar preflight OPTIONS para CORS
     if request.method == 'OPTIONS':
         response = jsonify({})
         origin = request.headers.get('Origin', '')
-        if origin and ('trycloudflare.com' in origin or origin in Config.CORS_ORIGINS):
+        if origin and (TRYCLOUDFLARE_DOMAIN in origin or origin in Config.CORS_ORIGINS):
             response.headers['Access-Control-Allow-Origin'] = origin
             response.headers['Access-Control-Allow-Credentials'] = 'true'
             response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
             response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
         return response, 200
-    
+
     try:
-        logger.info("[LOGIN] Endpoint de login llamado")
-        logger.info(f"[LOGIN] Origen de la petición: {request.headers.get('Origin')}")
-        logger.info(f"[LOGIN] Referer: {request.headers.get('Referer')}")
-        logger.info(f"[LOGIN] Host: {request.headers.get('Host')}")
-        logger.info(f"[LOGIN] Cookies recibidas: {dict(request.cookies)}")
-        logger.info(f"[LOGIN] Método: {request.method}")
-        logger.info(f"[LOGIN] Content-Type: {request.headers.get('Content-Type')}")
-        
+        logger.info("[LOGIN] Solicitud de autenticación recibida")
         data = request.get_json() or {}
         usuario = data.get("usuario")
         password = data.get("password")
-        
-        logger.info(f"[LOGIN] Intento de login para usuario: {usuario}")
-        
+
         if not usuario or not password:
-            logger.warning("[LOGIN] Usuario o contraseña faltantes")
-            # Asegurar headers CORS para Cloudflare en respuesta de error
-            response = jsonify({"error": "Usuario y contraseña requeridos"})
-            origin = request.headers.get('Origin', '')
-            if origin and is_cloudflare_origin(origin):
-                response.headers['Access-Control-Allow-Origin'] = origin
-                response.headers['Access-Control-Allow-Credentials'] = 'true'
-            return response, 400
-        
+            logger.warning("[LOGIN] Credenciales incompletas")
+            return _login_add_cloudflare_cors_headers(
+                jsonify({"error": MSG_USER_PASSWORD_REQUIRED})
+            ), 400
+
         try:
             user = db.execute_query(
                 "SELECT `idUsuario`, `usuario`, `contrasena`, `nombre`, `rol` FROM `usuarios_nul` WHERE `usuario` = %s",
                 (usuario,),
                 fetch_one=True
             )
-        except Exception as e:
-            logger.error(f"[LOGIN] Error en login: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-            # Los headers CORS ya se agregan automáticamente por el decorador @app.after_request
+        except Exception:
+            logger.exception("[LOGIN] Error al consultar la base de datos")
             return jsonify({
                 "error": "Error al consultar la base de datos",
                 "message": "No se pudo conectar al servidor de base de datos. Por favor, intenta nuevamente."
             }), 500
-        
+
         if not user:
-            logger.warning(f"[LOGIN] Usuario no encontrado: {usuario}")
-            # Registrar intento de login fallido como ataque
+            logger.warning("[LOGIN] Credenciales incorrectas (usuario no encontrado)")
             action_logger.log_action(
                 usuario=usuario,
                 accion='login_fallido',
                 nivel='ataque',
-                descripcion=f"Intento de login fallido: usuario '{usuario}' no encontrado"
+                descripcion="Intento de login fallido: usuario no encontrado"
             )
-            # Asegurar headers CORS para Cloudflare en respuesta de error
-            response = jsonify({"error": "Credenciales incorrectas"})
-            origin = request.headers.get('Origin', '')
-            if origin and is_cloudflare_origin(origin):
-                response.headers['Access-Control-Allow-Origin'] = origin
-                response.headers['Access-Control-Allow-Credentials'] = 'true'
-            return response, 401
-        
-        stored_password = user.get('contrasena', '')
-        input_password = password
-        
-        logger.info(f"[LOGIN] Verificando contraseña...")
-        
-        # Verificar si la contraseña almacenada es un hash bcrypt o texto plano (migración)
-        if is_password_hashed(stored_password):
-            # Contraseña está hasheada, usar bcrypt
-            password_valid = verify_password(input_password, stored_password)
-        else:
-            # Contraseña en texto plano (legacy), comparar directamente y luego hashear
-            logger.warning(f"[LOGIN] Usuario '{usuario}' tiene contraseña en texto plano. Debe actualizarse.")
-            password_valid = (stored_password == input_password)
-            
-            # Si la contraseña es correcta, actualizar a hash
-            if password_valid:
-                try:
-                    hashed_password = hash_password(input_password)
-                    db.execute_query(
-                        "UPDATE usuarios_nul SET contrasena = %s WHERE idUsuario = %s",
-                        (hashed_password, user['idUsuario'])
-                    )
-                    logger.info(f"[LOGIN] Contraseña de usuario '{usuario}' actualizada a hash bcrypt")
-                except Exception as e:
-                    logger.error(f"[LOGIN] Error al actualizar contraseña a hash: {e}")
-        
+            return _login_add_cloudflare_cors_headers(
+                jsonify({"error": "Credenciales incorrectas"})
+            ), 401
+
+        password_valid = _login_verify_password_and_migrate(user, password)
+
         if password_valid:
             rol = user.get('rol') or 'usuario'
-            logger.info(f"[LOGIN] Login exitoso para usuario: {usuario}, rol: {rol}")
-            
-            # Registrar login exitoso
+            logger.info("[LOGIN] Autenticación correcta (rol=%s)", rol)
             action_logger.log_action(
                 usuario=usuario,
                 accion='login_exitoso',
                 nivel='aviso',
-                descripcion=f"Login exitoso para usuario '{usuario}' con rol '{rol}'"
+                descripcion="Login exitoso"
             )
-            
             token = generate_token(
                 user_id=user['idUsuario'],
-                usuario=user['usuario'],  # Usar usuario de la BD, no nombre
+                usuario=user['usuario'],
                 rol=rol,
                 nombre=user.get('nombre')
             )
-            
-            logger.info(f"[LOGIN] Token generado con rol: {rol}")
-            logger.info(f"[LOGIN] Token (primeros 30 chars): {token[:30] if len(token) > 30 else token}")
-            
+            logger.info("[LOGIN] Token JWT emitido")
             response = jsonify({
                 "mensaje": "Inicio de sesión exitoso",
                 "usuario": user.get('nombre') or user['usuario'],
                 "nombre": user.get('nombre'),
                 "rol": rol
             })
-            
-            # Obtener el origen de la petición para configurar la cookie correctamente
-            origin = request.headers.get('Origin', '')
-            logger.info(f"[LOGIN] Origen de la petición: {origin}")
-            
-            # Configurar cookie para que persista entre pestañas
-            # IMPORTANTE: Las cookies se establecen en el dominio del servidor (localhost:5000)
-            # El frontend (localhost:4321) puede enviar cookies cross-origin si están configuradas correctamente
-            # Para que las cookies funcionen entre pestañas, necesitan:
-            # 1. Mismo dominio (localhost en este caso)
-            # 2. Mismo path (/)
-            # 3. Configuración correcta de SameSite
-            
-            # Obtener el hostname de la petición para establecer el dominio correcto
-            host = request.headers.get('Host', 'localhost:5000')
-            hostname = host.split(':')[0] if ':' in host else host
-            origin = request.headers.get('Origin', '')
-            
-            logger.info(f"[LOGIN] Host de la petición: {host}")
-            logger.info(f"[LOGIN] Hostname extraído: {hostname}")
-            logger.info(f"[LOGIN] Origin: {origin}")
-            
-            # Detectar si estamos usando Cloudflare Tunnel (dominios .trycloudflare.com)
-            is_cloudflare = 'trycloudflare.com' in hostname or 'trycloudflare.com' in origin
-            is_https = request.is_secure or origin.startswith('https://') or 'trycloudflare.com' in origin
-            
-            logger.info(f"[LOGIN] Es Cloudflare: {is_cloudflare}")
-            logger.info(f"[LOGIN] Es HTTPS: {is_https}")
-            
-            # Configurar cookie según el entorno
-            # Para Cloudflare Tunnel: usar secure=True y samesite='None'
-            # Para localhost: usar secure=False y samesite='Lax'
-            cookie_domain = None
-            cookie_secure = is_https
-            cookie_samesite = 'None' if is_cloudflare else 'Lax'
-            
-            # Si es Cloudflare, no establecer dominio específico (None funciona mejor)
-            if is_cloudflare:
-                cookie_domain = None
-            else:
-                cookie_domain = None  # Mantener None para localhost también
-            
+            cookie_secure, cookie_samesite = _login_cookie_settings()
             response.set_cookie(
-                'auth_token', 
-                token, 
-                max_age=86400,  # 24 horas
-                httponly=True,  # HTTP-only para seguridad
-                secure=cookie_secure,   # True para HTTPS (Cloudflare), False para HTTP (localhost)
-                samesite=cookie_samesite, # 'None' para Cloudflare, 'Lax' para localhost
-                path='/',       # Disponible en todo el path del dominio
-                domain=cookie_domain     # None = dominio exacto del servidor
+                'auth_token',
+                token,
+                max_age=86400,
+                httponly=True,
+                secure=cookie_secure,
+                samesite=cookie_samesite,
+                path='/',
+                domain=None
             )
-            
-            logger.info(f"[LOGIN] Cookie establecida correctamente")
-            
-            # Notificar a los observadores sobre el login (patrón Observer)
+            logger.info(
+                "[LOGIN] Cookie de sesión configurada (secure=%s, samesite=%s)",
+                cookie_secure,
+                cookie_samesite,
+            )
             auth_event_subject.user_logged_in({
                 'usuario': user['usuario'],
                 'rol': rol,
                 'nombre': user.get('nombre')
             })
-            logger.info(f"[LOGIN] Configuración: max_age=86400, httponly=True, secure={cookie_secure}, samesite={cookie_samesite}, path=/, domain={cookie_domain}")
-            
-            # Verificar que la cookie se estableció en los headers de respuesta
-            # Nota: Flask no expone Set-Cookie directamente, pero podemos verificar si se estableció
-            logger.info(f"[LOGIN] Cookie establecida para usuario: {usuario}")
-            logger.info(f"[LOGIN] Response headers keys: {list(response.headers.keys())}")
-            
-            # Intentar obtener el valor de Set-Cookie del response (Flask lo maneja internamente)
-            # Flask establece la cookie en el objeto response, pero no la muestra en headers hasta que se envía
-            logger.info(f"[LOGIN] Cookie debería estar establecida en la respuesta")
-            
-            # Los headers CORS ya se agregan automáticamente por el decorador @app.after_request
             return response
-        else:
-            logger.warning(f"[LOGIN] Contraseña incorrecta para usuario: {usuario}")
-            # Registrar intento de login fallido como ataque
-            action_logger.log_action(
-                usuario=usuario,
-                accion='login_fallido',
-                nivel='ataque',
-                descripcion=f"Intento de login fallido: contraseña incorrecta para usuario '{usuario}'"
-            )
-            # Asegurar headers CORS para Cloudflare en respuesta de error
-            response = jsonify({"error": "Credenciales incorrectas"})
-            origin = request.headers.get('Origin', '')
-            if origin and is_cloudflare_origin(origin):
-                response.headers['Access-Control-Allow-Origin'] = origin
-                response.headers['Access-Control-Allow-Credentials'] = 'true'
-            return response, 401
-    except Exception as e:
-        logger.error(f"[LOGIN] Error en login: {e}")
-        import traceback
-        logger.error(traceback.format_exc())
+
+        logger.warning("[LOGIN] Credenciales incorrectas (contraseña inválida)")
+        action_logger.log_action(
+            usuario=usuario,
+            accion='login_fallido',
+            nivel='ataque',
+            descripcion="Intento de login fallido: contraseña incorrecta"
+        )
+        return _login_add_cloudflare_cors_headers(
+            jsonify({"error": "Credenciales incorrectas"})
+        ), 401
+    except Exception:
+        logger.exception("[LOGIN] Error interno")
         return jsonify({"error": "Error interno del servidor"}), 500
 
 
@@ -818,8 +820,9 @@ def logout():
         
         # Detectar si estamos usando Cloudflare
         origin = request.headers.get('Origin', '')
-        is_cloudflare = 'trycloudflare.com' in origin or 'trycloudflare.com' in request.headers.get('Host', '')
-        is_https = request.is_secure or origin.startswith('https://') or is_cloudflare
+        host_hdr = request.headers.get('Host', '')
+        is_cloudflare = TRYCLOUDFLARE_DOMAIN in origin or TRYCLOUDFLARE_DOMAIN in host_hdr
+        is_https = request.is_secure or (origin.startswith(HTTPS_PREFIX) if origin else False) or is_cloudflare
         
         # Eliminar cookie - usar configuración según el entorno
         cookie_secure = is_https
@@ -845,39 +848,19 @@ def logout():
 def get_news():
     """Obtener noticias desde MySQL (optimizado con caché, paginación, categorías y fijadas)"""
     try:
-        # Obtener parámetros de paginación
         limit = request.args.get('limit', default=15, type=int)
         offset = request.args.get('offset', default=0, type=int)
         categoria_id = request.args.get('categoria', type=int)
         search = request.args.get('search', '').strip()
-        
-        # Clave de caché basada en parámetros
         cache_key = f"news_{limit}_{offset}_{categoria_id}_{search}"
-        
-        # Intentar obtener del caché (solo si no hay búsqueda)
+
         if not search:
             cached_result = cache.get(cache_key)
             if cached_result is not None:
                 return jsonify(cached_result)
-        
-        # Construir query base
-        where_clauses = []
-        params = []
-        
-        # Filtro por categoría
-        if categoria_id:
-            where_clauses.append("n.id IN (SELECT noticia_id FROM noticias_categorias WHERE categoria_id = %s)")
-            params.append(categoria_id)
-        
-        # Filtro por búsqueda
-        if search:
-            where_clauses.append("(n.titulo LIKE %s OR n.contenido LIKE %s OR n.autor LIKE %s)")
-            search_param = f"%{search}%"
-            params.extend([search_param, search_param, search_param])
-        
+
+        where_clauses, params = _news_query_filters(categoria_id, search)
         where_sql = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
-        
-        # Query optimizada: ordenar por fecha descendente (más recientes primero)
         query = f"""SELECT n.id, n.titulo, n.contenido, n.autor, n.fecha, n.imagen_url as imagen,
                       COALESCE(u.nombre, n.autor) as nombre_autor,
                       COALESCE(u.rol, 'usuario') as rol_autor
@@ -886,54 +869,16 @@ def get_news():
                {where_sql}
                ORDER BY n.fecha DESC
                LIMIT %s OFFSET %s"""
-        
         params.extend([limit, offset])
-        
-        noticias = db.execute_query(query, tuple(params), fetch_all=True)
-        
-        # Obtener categorías para cada noticia
-        categorias_por_noticia = {}
-        if noticias:
-            noticia_ids = [n['id'] for n in noticias]
-            if noticia_ids:
-                # Usar parámetros preparados para seguridad
-                placeholders = ','.join(['%s'] * len(noticia_ids))
-                categorias_query = f"""SELECT nc.noticia_id, c.id, c.nombre, c.color
-                                      FROM noticias_categorias nc
-                                      JOIN categorias_nul c ON nc.categoria_id = c.id
-                                      WHERE nc.noticia_id IN ({placeholders})"""
-                categorias_data = db.execute_query(categorias_query, tuple(noticia_ids), fetch_all=True)
-                
-                # Agrupar categorías por noticia
-                for cat in categorias_data:
-                    noticia_id = cat['noticia_id']
-                    if noticia_id not in categorias_por_noticia:
-                        categorias_por_noticia[noticia_id] = []
-                    categorias_por_noticia[noticia_id].append({
-                        'id': cat['id'],
-                        'nombre': cat['nombre'],
-                        'color': cat['color']
-                    })
-        
-        # Convertir fecha a string para JSON y agregar categorías
-        for noticia in noticias:
-            if noticia.get('fecha'):
-                # Si la fecha ya es string (JSON), no convertir
-                if isinstance(noticia['fecha'], str):
-                    pass  # Ya es string, no hacer nada
-                else:
-                    # Si es datetime, convertir a string
-                    noticia['fecha'] = noticia['fecha'].strftime("%Y-%m-%d %H:%M:%S")
-            if not noticia.get('imagen'):
-                noticia['imagen'] = ""
-            noticia['categorias'] = categorias_por_noticia.get(noticia['id'], [])
-        
-        result = noticias if noticias else []
-        
-        # Guardar en caché solo si no hay búsqueda (TTL de 10 segundos para actualizaciones más rápidas)
+        noticias = db.execute_query(query, tuple(params), fetch_all=True) or []
+        noticia_ids = [n['id'] for n in noticias]
+        categorias_por_noticia = _news_categories_by_ids(noticia_ids)
+        _news_attach_meta(noticias, categorias_por_noticia)
+        result = noticias
+
         if not search:
             cache.set(cache_key, result, ttl=10)
-        
+
         return jsonify(result)
     except Exception as e:
         logger.error(f"Error al obtener noticias: {e}")
@@ -1042,7 +987,7 @@ def update_news(news_id):
         
         # Obtener título actual de la noticia para el log
         noticia_actual = news_facade.get_news_by_id(news_id)
-        titulo_actual = noticia_actual.get('titulo', 'Sin título') if noticia_actual else 'Sin título'
+        titulo_actual = noticia_actual.get('titulo', DEFAULT_NEWS_TITLE) if noticia_actual else DEFAULT_NEWS_TITLE
         
         # Usar la fachada para actualizar la noticia (encapsula validación, BD, categorías, caché)
         noticia_actualizada = news_facade.update_news(
@@ -1094,7 +1039,7 @@ def delete_news(news_id):
         
         # Obtener título de la noticia antes de eliminarla para el log
         noticia_actual = news_facade.get_news_by_id(news_id)
-        titulo_noticia = noticia_actual.get('titulo', 'Sin título') if noticia_actual else 'Sin título'
+        titulo_noticia = noticia_actual.get('titulo', DEFAULT_NEWS_TITLE) if noticia_actual else DEFAULT_NEWS_TITLE
         
         # Usar la fachada para eliminar la noticia (encapsula Firebase, BD, caché)
         news_facade.delete_news(news_id)
@@ -1196,8 +1141,8 @@ def upload_image():
         unique_filename = f"{uuid.uuid4()}.{file_ext}"
         destination_path = f"noticias/{unique_filename}"
         
-        logger.info(f"Intentando subir imagen: {destination_path}")
-        logger.info(f"Bucket configurado: {Config.FIREBASE_STORAGE_BUCKET}")
+        logger.info("Intentando subir imagen a almacenamiento (ruta interna no registrada en log)")
+        logger.info("Bucket de almacenamiento configurado")
         
         # Subir a Firebase Storage
         image_url = firebase.upload_image_from_file_storage(file, destination_path)
@@ -1234,7 +1179,7 @@ def upload_image():
             "details": error_traceback if Config.DEBUG else "Habilita DEBUG para ver más detalles"
         }), 500
 
-@app.route('/api/config')
+@app.route('/api/config', methods=['GET'])
 def get_config():
     config = ConfigSingleton()
     return jsonify(config.config)
@@ -1314,9 +1259,7 @@ def test_cookie():
     """Endpoint de prueba para verificar que las cookies funcionen"""
     try:
         logger.info("[TEST-COOKIE] Endpoint llamado")
-        logger.info(f"[TEST-COOKIE] Cookies recibidas: {dict(request.cookies)}")
-        logger.info(f"[TEST-COOKIE] Headers recibidos: {dict(request.headers)}")
-        logger.info(f"[TEST-COOKIE] Origen de la petición: {request.headers.get('Origin')}")
+        logger.info("[TEST-COOKIE] Petición de prueba (detalles de cabeceras no registrados)")
         
         # Intentar establecer una cookie de prueba
         response = jsonify({
@@ -1559,7 +1502,7 @@ def debug_tables():
 # Database Manager Dashboard (tipo phpMyAdmin)
 # ============================================
 
-@app.route('/db-manager')
+@app.route('/db-manager', methods=['GET'])
 @require_permission('manage_admins')  # Solo superadmin puede acceder
 def db_manager():
     """Página principal del Database Manager"""
@@ -2058,10 +2001,9 @@ def get_db_tables():
     """Obtener lista de todas las tablas en la base de datos JSON"""
     try:
         if Config.DATABASE_TYPE != 'json':
-            return jsonify({"error": "Este endpoint solo funciona con base de datos JSON"}), 400
+            return jsonify({"error": MSG_JSON_DB_ONLY}), 400
         
-        # Cargar datos directamente desde el archivo JSON
-        db_file = os.path.join(os.path.dirname(__file__), 'database.json')
+        db_file = _json_db_file_path()
         with open(db_file, 'r', encoding='utf-8') as f:
             data = json.load(f)
         
@@ -2088,9 +2030,9 @@ def get_table_data(table_name):
     """Obtener todos los registros de una tabla específica"""
     try:
         if Config.DATABASE_TYPE != 'json':
-            return jsonify({"error": "Este endpoint solo funciona con base de datos JSON"}), 400
+            return jsonify({"error": MSG_JSON_DB_ONLY}), 400
         
-        db_file = os.path.join(os.path.dirname(__file__), 'database.json')
+        db_file = _json_db_file_path()
         with open(db_file, 'r', encoding='utf-8') as f:
             data = json.load(f)
         
@@ -2117,9 +2059,9 @@ def create_table_record(table_name):
     """Crear un nuevo registro en una tabla"""
     try:
         if Config.DATABASE_TYPE != 'json':
-            return jsonify({"error": "Este endpoint solo funciona con base de datos JSON"}), 400
+            return jsonify({"error": MSG_JSON_DB_ONLY}), 400
         
-        db_file = os.path.join(os.path.dirname(__file__), 'database.json')
+        db_file = _json_db_file_path()
         with open(db_file, 'r', encoding='utf-8') as f:
             data = json.load(f)
         
@@ -2127,24 +2069,8 @@ def create_table_record(table_name):
             return jsonify({"error": f"Tabla '{table_name}' no encontrada"}), 404
         
         new_record = request.get_json()
-        
-        # Generar ID si es necesario
-        id_field = db.get_id_field(table_name) if hasattr(db, 'get_id_field') else None
-        if id_field and id_field not in new_record:
-            if 'last_ids' not in data:
-                data['last_ids'] = {}
-            if table_name not in data['last_ids']:
-                data['last_ids'][table_name] = 0
-            data['last_ids'][table_name] += 1
-            new_record[id_field] = data['last_ids'][table_name]
-        
-        # Agregar fecha si existe el campo
-        if 'fecha_creacion' in new_record or 'fecha' in new_record:
-            if 'fecha_creacion' not in new_record:
-                new_record['fecha_creacion'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            if 'fecha' not in new_record and table_name == 'noticias_nul':
-                new_record['fecha'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
+        _json_assign_id_if_needed(data, table_name, new_record)
+        _json_set_creation_timestamps(new_record, table_name)
         data[table_name].append(new_record)
         
         with open(db_file, 'w', encoding='utf-8') as f:
@@ -2164,9 +2090,9 @@ def update_table_record(table_name, record_id):
     """Actualizar un registro en una tabla"""
     try:
         if Config.DATABASE_TYPE != 'json':
-            return jsonify({"error": "Este endpoint solo funciona con base de datos JSON"}), 400
+            return jsonify({"error": MSG_JSON_DB_ONLY}), 400
         
-        db_file = os.path.join(os.path.dirname(__file__), 'database.json')
+        db_file = _json_db_file_path()
         with open(db_file, 'r', encoding='utf-8') as f:
             data = json.load(f)
         
@@ -2200,9 +2126,9 @@ def delete_table_record(table_name, record_id):
     """Eliminar un registro de una tabla"""
     try:
         if Config.DATABASE_TYPE != 'json':
-            return jsonify({"error": "Este endpoint solo funciona con base de datos JSON"}), 400
+            return jsonify({"error": MSG_JSON_DB_ONLY}), 400
         
-        db_file = os.path.join(os.path.dirname(__file__), 'database.json')
+        db_file = _json_db_file_path()
         with open(db_file, 'r', encoding='utf-8') as f:
             data = json.load(f)
         
@@ -2214,7 +2140,7 @@ def delete_table_record(table_name, record_id):
         # Buscar y eliminar el registro
         for i, record in enumerate(data[table_name]):
             if str(record.get(id_field, i)) == str(record_id):
-                deleted = data[table_name].pop(i)
+                data[table_name].pop(i)
                 
                 with open(db_file, 'w', encoding='utf-8') as f:
                     json.dump(data, f, indent=2, ensure_ascii=False)

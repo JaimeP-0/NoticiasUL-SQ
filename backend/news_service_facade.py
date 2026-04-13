@@ -32,6 +32,8 @@ from mediator_pattern import Mediator
 
 logger = logging.getLogger(__name__)
 
+MSG_NOTICIA_NO_ENCONTRADA = "Noticia no encontrada"
+
 
 class NewsServiceFacade:    
     def __init__(self, db: Optional[Database] = None, 
@@ -41,6 +43,17 @@ class NewsServiceFacade:
         self._database_subsystem = db or Database()
         self._firebase_subsystem = firebase or FirebaseService()
         self._mediator = mediator
+
+    @staticmethod
+    def _validate_update_fields(titulo, contenido):
+        if titulo is not None:
+            if not titulo.strip() or len(titulo.strip()) < 5:
+                raise ValueError("El título debe tener al menos 5 caracteres")
+            if len(titulo.strip()) > 255:
+                raise ValueError("El título no puede exceder 255 caracteres")
+        if contenido is not None:
+            if not contenido.strip() or len(contenido.strip()) < 50:
+                raise ValueError("El contenido debe tener al menos 50 caracteres")
     
     @combine_decorators(
         LoggingDecorator.log_operation("Crear noticia"),
@@ -55,7 +68,7 @@ class NewsServiceFacade:
         es_valido, error = validator.validate(titulo, contenido, autor, imagen_url)
         
         if not es_valido:
-            logger.error(f"Validación fallida: {error}")
+            logger.error("Validación fallida al crear noticia")
             raise ValueError(error)
         
         noticia_obj = NoticiaFactory.crear(tipo_noticia, titulo, contenido, autor, imagen_url)
@@ -82,11 +95,19 @@ class NewsServiceFacade:
                 break
             except Exception as e:
                 if attempt < max_retries - 1:
-                    logger.warning(f"⚠️ No se pudo obtener noticia {noticia_id} después de crear, reintentando... (Intento {attempt + 1}/{max_retries})")
+                    logger.warning(
+                        "Reintento al leer noticia recién creada (intento %s/%s)",
+                        attempt + 1,
+                        max_retries,
+                    )
                     import time
                     time.sleep(0.2 * (attempt + 1))  # Backoff corto
                 else:
-                    logger.error(f"❌ No se pudo obtener noticia {noticia_id} después de {max_retries} intentos: {e}")
+                    logger.error(
+                        "No se pudo obtener noticia tras crearla (%s intentos): %s",
+                        max_retries,
+                        type(e).__name__,
+                    )
                     # Si no se puede obtener, crear un objeto básico con los datos que tenemos
                     noticia = {
                         'id': noticia_id,
@@ -150,18 +171,9 @@ class NewsServiceFacade:
         )
         
         if not noticia_existente:
-            raise ValueError("Noticia no encontrada")
+            raise ValueError(MSG_NOTICIA_NO_ENCONTRADA)
         
-        # 2. Validar datos si se proporcionan (validación local simplificada)
-        if titulo is not None:
-            if not titulo.strip() or len(titulo.strip()) < 5:
-                raise ValueError("El título debe tener al menos 5 caracteres")
-            if len(titulo.strip()) > 255:
-                raise ValueError("El título no puede exceder 255 caracteres")
-        
-        if contenido is not None:
-            if not contenido.strip() or len(contenido.strip()) < 50:
-                raise ValueError("El contenido debe tener al menos 50 caracteres")
+        self._validate_update_fields(titulo, contenido)
         
         # 3. Construir query de actualización dinámicamente
         updates = []
@@ -239,7 +251,7 @@ class NewsServiceFacade:
         )
         
         if not noticia_existente:
-            raise ValueError("Noticia no encontrada")
+            raise ValueError(MSG_NOTICIA_NO_ENCONTRADA)
         
         # 2. Delegar eliminación de imagen al subsistema de Firebase
         imagen_url = noticia_existente.get('imagen_url')
@@ -360,7 +372,7 @@ class NewsServiceFacade:
         )
         
         if not noticia:
-            raise ValueError("Noticia no encontrada")
+            raise ValueError(MSG_NOTICIA_NO_ENCONTRADA)
         
         # Delegar consulta de categorías al subsistema de base de datos
         categorias = self._database_subsystem.execute_query(
@@ -416,18 +428,22 @@ class NewsServiceFacade:
             logger.debug(f"No hay categorías para asociar a la noticia {noticia_id}")
             return
         
-        logger.info(f"Asociando {len(categorias)} categoría(s) a la noticia {noticia_id}: {categorias}")
+        logger.info("Asociando %s categoría(s) a la noticia %s", len(categorias), noticia_id)
         
         # Delegar asociación de categorías al subsistema de base de datos
         for cat_id in categorias:
             try:
-                result = self._database_subsystem.execute_query(
+                self._database_subsystem.execute_query(
                     "INSERT INTO noticias_categorias (noticia_id, categoria_id) VALUES (%s, %s)",
                     (noticia_id, cat_id)
                 )
-                logger.debug(f"✅ Categoría {cat_id} asociada exitosamente a noticia {noticia_id}")
+                logger.debug("Categoría asociada a noticia %s", noticia_id)
             except Exception as e:
-                logger.error(f"❌ Error al asociar categoría {cat_id} a noticia {noticia_id}: {e}")
+                logger.error(
+                    "Error al asociar categoría a noticia %s: %s",
+                    noticia_id,
+                    type(e).__name__,
+                )
                 import traceback
                 logger.error(traceback.format_exc())
     
