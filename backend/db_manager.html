@@ -65,8 +65,8 @@
         }
         
         .tab.active {
-            background: #667eea;
-            color: white;
+            background: #3730a3;
+            color: #ffffff;
         }
         
         .panel {
@@ -527,7 +527,7 @@
                         }
                     });
                     html += `<td class="actions">
-                        <button class="btn btn-primary btn-sm" onclick="editRecord('${tableName}', ${JSON.stringify(row).replace(/"/g, '&quot;')})">✏️ Editar</button>
+                        <button class="btn btn-primary btn-sm" onclick="editRecord('${tableName}', ${JSON.stringify(row).replaceAll('"', '&quot;')})">✏️ Editar</button>
                         <button class="btn btn-danger btn-sm" onclick="deleteRecord('${tableName}', ${row.id || row.idUsuario || index})">🗑️ Eliminar</button>
                     </td></tr>`;
                 });

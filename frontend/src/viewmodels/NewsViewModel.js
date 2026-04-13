@@ -369,7 +369,7 @@ class NewsViewModel {
         try {
             const date = new Date(dateString);
             // Verificar si la fecha es válida
-            if (isNaN(date.getTime())) {
+            if (Number.isNaN(date.getTime())) {
                 return 'Fecha no disponible';
             }
             return date.toLocaleDateString('es-ES', {
@@ -406,14 +406,14 @@ class NewsViewModel {
             .toString()
             .toLowerCase()
             .trim()
-            .replace(/\s+/g, '-')
+            .replaceAll(/\s+/g, '-')
             .normalize('NFD')
-            .replace(/[\u0300-\u036f]/g, '')
-            .replace(/[^a-z0-9-]/g, '')
-            .replace(/-+/g, '-')
-            .replace(/^-+|-+$/g, '')
+            .replaceAll(/[\u0300-\u036f]/g, '')
+            .replaceAll(/[^a-z0-9-]/g, '')
+            .replaceAll(/-+/g, '-')
+            .replaceAll(/^-+|-+$/g, '')
             .substring(0, 100)
-            .replace(/-+$/, '');
+            .replaceAll(/-+$/, '');
     }
 
     /**
@@ -439,8 +439,8 @@ class NewsViewModel {
 }
 
 // Exportar para uso global
-if (typeof window !== 'undefined') {
-    window.NewsViewModel = NewsViewModel;
+if (typeof globalThis.window !== 'undefined') {
+    globalThis.NewsViewModel = NewsViewModel;
 }
 
 // Exportar para módulos ES6

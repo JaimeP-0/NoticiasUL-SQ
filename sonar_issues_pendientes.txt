@@ -1,0 +1,10 @@
+# SonarQube — lista original atendida en código
+
+Los ítems del listado (logs, constantes, database/database_json, db_manager, facade, app.js, NewsModel, NewsViewModel, router, authService) se corrigieron o refactorizaron en el repo.
+
+## Qué hacer ahora
+- Vuelve a lanzar el análisis en SonarQube: es la fuente de verdad para CC y reglas nuevas.
+
+## Si algo sigue en rojo
+- Complejidad: métodos aún densos posibles — `_parse_select_column_clause` y `init_tables` en `backend/database_json.py`, e `init_tables` en `backend/database.py`.
+- Cualquier falso positivo nuevo: suprimir solo con justificación en Sonar o ajustar regla en calidad de perfil.

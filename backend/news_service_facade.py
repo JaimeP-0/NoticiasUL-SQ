@@ -79,7 +79,7 @@ class NewsServiceFacade:
             "INSERT INTO noticias_nul (titulo, contenido, autor, imagen_url) VALUES (%s, %s, %s, %s)",
             (titulo, contenido, autor, imagen_url_final)
         )
-        logger.info(f"Noticia insertada en BD con ID: {noticia_id}")
+        logger.info("Noticia insertada en base de datos")
         
         if categorias:
             self._associate_categories(noticia_id, categorias)
@@ -425,10 +425,10 @@ class NewsServiceFacade:
             categorias: Lista de IDs de categorías
         """
         if not categorias:
-            logger.debug(f"No hay categorías para asociar a la noticia {noticia_id}")
+            logger.debug("Sin categorías para asociar en esta operación")
             return
         
-        logger.info("Asociando %s categoría(s) a la noticia %s", len(categorias), noticia_id)
+        logger.info("Asociando categorías (cantidad=%s)", len(categorias))
         
         # Delegar asociación de categorías al subsistema de base de datos
         for cat_id in categorias:
@@ -437,15 +437,9 @@ class NewsServiceFacade:
                     "INSERT INTO noticias_categorias (noticia_id, categoria_id) VALUES (%s, %s)",
                     (noticia_id, cat_id)
                 )
-                logger.debug("Categoría asociada a noticia %s", noticia_id)
+                logger.debug("Categoría asociada correctamente")
             except Exception as e:
-                logger.error(
-                    "Error al asociar categoría a noticia %s: %s",
-                    noticia_id,
-                    type(e).__name__,
-                )
-                import traceback
-                logger.error(traceback.format_exc())
+                logger.error("Error al asociar categoría: %s", type(e).__name__)
     
     def _update_categories(self, noticia_id: int, categorias: List[int]) -> None:
         """

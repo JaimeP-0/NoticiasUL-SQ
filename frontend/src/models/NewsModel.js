@@ -11,9 +11,7 @@
  * - Obtener categorías
  */
 class NewsModel {
-    constructor() {
-        this.baseUrl = '/api';
-    }
+    baseUrl = '/api';
 
     /**
      * Obtener lista de noticias con filtros y paginación
@@ -214,8 +212,8 @@ class NewsModel {
 }
 
 // Exportar para uso global
-if (typeof window !== 'undefined') {
-    window.NewsModel = NewsModel;
+if (typeof globalThis.window !== 'undefined') {
+    globalThis.NewsModel = NewsModel;
 }
 
 // Exportar para módulos ES6

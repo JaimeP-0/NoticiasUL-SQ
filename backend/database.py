@@ -61,9 +61,11 @@ class Database:
                 connection = pool.get_connection()
                 return connection
             except pooling.PoolError:
+                logger.warning("Pool sin conexiones libres; segundo intento de obtener conexión")
                 try:
                     return pool.get_connection()
                 except pooling.PoolError:
+                    logger.error("No se pudo obtener conexión del pool tras el reintento")
                     raise
             except Error as e:
                 logger.error(f"Error al obtener conexión del pool: {e}")
@@ -89,110 +91,78 @@ class Database:
                 logger.error(f"Error al crear conexión directa: {e}")
                 raise
     
+    @staticmethod
+    def _cursor_fetch_result(cursor, fetch_one, fetch_all):
+        if fetch_one:
+            return cursor.fetchone()
+        if fetch_all:
+            return cursor.fetchall()
+        if cursor.rowcount is not None:
+            result = cursor.lastrowid if cursor.lastrowid else cursor.rowcount
+        else:
+            result = None
+        try:
+            cursor.fetchall()
+        except Error:
+            pass
+        return result
+
+    @staticmethod
+    def _rollback_silent(connection):
+        if connection and not connection.autocommit:
+            try:
+                connection.rollback()
+            except Error:
+                pass
+
+    @staticmethod
+    def _close_cursor_silent(cursor):
+        if not cursor:
+            return
+        try:
+            cursor.close()
+        except Error:
+            pass
+
+    @staticmethod
+    def _close_connection_silent(connection):
+        if not connection:
+            return
+        try:
+            if connection.is_connected():
+                connection.close()
+        except Exception as ex:
+            logger.warning("Error al cerrar conexión: %s", type(ex).__name__)
+
+    def _run_sql(self, use_pool, query, params, fetch_one, fetch_all, log_label):
+        connection = None
+        cursor = None
+        try:
+            connection = self.get_connection(use_pool=use_pool)
+            cursor = connection.cursor(dictionary=True, buffered=True)
+            cursor.execute(query, params or ())
+            result = Database._cursor_fetch_result(cursor, fetch_one, fetch_all)
+            if not connection.autocommit:
+                connection.commit()
+            return result
+        except Error as e:
+            logger.error("Error al ejecutar %s: %s", log_label, e)
+            Database._rollback_silent(connection)
+            raise
+        finally:
+            Database._close_cursor_silent(cursor)
+            Database._close_connection_silent(connection)
+
     def execute_query_direct(self, query, params=None, fetch_one=False, fetch_all=False):
         """
         Ejecutar consulta con conexión directa (sin pool) - más simple pero menos eficiente
         Útil para scripts o operaciones puntuales
         """
-        connection = None
-        cursor = None
-        try:
-            connection = self.get_connection(use_pool=False)
-            cursor = connection.cursor(dictionary=True, buffered=True)
-            
-            cursor.execute(query, params or ())
-            
-            if fetch_one:
-                result = cursor.fetchone()
-            elif fetch_all:
-                result = cursor.fetchall()
-            else:
-                if cursor.rowcount is not None:
-                    result = cursor.lastrowid if cursor.lastrowid else cursor.rowcount
-                else:
-                    result = None
-                try:
-                    cursor.fetchall()
-                except Error:
-                    pass
-            
-            if not connection.autocommit:
-                connection.commit()
-            
-            return result
-        except Error as e:
-            logger.error(f"❌ Error al ejecutar consulta directa: {e}")
-            if connection and not connection.autocommit:
-                try:
-                    connection.rollback()
-                except Error:
-                    pass
-            raise
-        finally:
-            if cursor:
-                try:
-                    cursor.close()
-                except Error:
-                    pass
-            if connection:
-                try:
-                    if connection.is_connected():
-                        connection.close()
-                except Exception as e:
-                    logger.warning(f"⚠️ Error al cerrar conexión directa: {e}")
-    
+        return self._run_sql(False, query, params, fetch_one, fetch_all, "consulta directa")
+
     def execute_query(self, query, params=None, fetch_one=False, fetch_all=False):
         """Ejecutar una consulta SQL usando el pool de conexiones"""
-        connection = None
-        cursor = None
-        try:
-            connection = self.get_connection()
-            cursor = connection.cursor(dictionary=True, buffered=True)
-            
-            cursor.execute(query, params or ())
-            
-            if fetch_one:
-                result = cursor.fetchone()
-            elif fetch_all:
-                result = cursor.fetchall()
-            else:
-                # Para INSERT/UPDATE/DELETE, obtener lastrowid o rowcount
-                if cursor.rowcount is not None:
-                    result = cursor.lastrowid if cursor.lastrowid else cursor.rowcount
-                else:
-                    result = None
-                # Consumir cualquier resultado pendiente para evitar "Unread result found"
-                try:
-                    cursor.fetchall()
-                except Error:
-                    pass
-            
-            if not connection.autocommit:
-                connection.commit()
-            
-            return result
-        except Error as e:
-            logger.error(f"❌ Error al ejecutar consulta: {e}")
-            if connection and not connection.autocommit:
-                try:
-                    connection.rollback()
-                except Error:
-                    pass
-            raise
-        finally:
-            # Cerrar cursor primero
-            if cursor:
-                try:
-                    cursor.close()
-                except Error:
-                    pass
-            # Devolver la conexión al pool (siempre cerrar, incluso si hay error)
-            if connection:
-                try:
-                    if connection.is_connected():
-                        connection.close()
-                except Exception as e:
-                    logger.warning(f"⚠️ Error al cerrar conexión: {e}")
+        return self._run_sql(True, query, params, fetch_one, fetch_all, "consulta")
     
     def init_tables(self):
         """Inicializar tablas en la base de datos"""

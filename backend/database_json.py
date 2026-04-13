@@ -100,353 +100,402 @@ class DatabaseJSON:
         
         self._data["last_ids"][table_name] += 1
         return self._data["last_ids"][table_name]
+
+    def _parse_select_column_clause(self, result: Dict[str, Any], fields_str: str) -> None:
+        """Rellena fields / field_aliases del resultado para SELECT."""
+        if fields_str == '*':
+            result["fields"] = ['*']
+            return
+        if 'COUNT' in fields_str.upper():
+            result["fields"] = ['COUNT(*)']
+            return
+        fields = []
+        field_aliases = {}
+        for raw in fields_str.split(','):
+            f = raw.strip().strip('`"')
+            alias = None
+            if ' AS ' in f.upper():
+                parts = f.split(' AS ', 1)
+                if len(parts) >= 2:
+                    f = parts[0].strip()
+                    alias = parts[1].strip().strip('`"')
+            if '(' not in f and '.' in f:
+                f = f.split('.')[-1]
+            if '(' in f and ')' in f:
+                match = re.findall(r'(\w+)\.(\w+)', f)
+                if match:
+                    for table_prefix, field_name in match:
+                        if table_prefix.lower() == 'n':
+                            f = field_name
+                            break
+                    else:
+                        f = match[0][1]
+                else:
+                    inner_match = re.search(r'\(([^)]+)\)', f)
+                    if inner_match:
+                        inner = inner_match.group(1).strip()
+                        inner_parts = [p.strip() for p in inner.split(',')]
+                        for part in inner_parts:
+                            if '.' in part:
+                                field_part = part.split('.')[-1].strip()
+                                if not (field_part.startswith("'") or field_part.startswith('"')):
+                                    f = field_part
+                                    break
+                        else:
+                            if inner_parts:
+                                first = inner_parts[0].strip()
+                                f = first.split('.')[-1] if '.' in first else first.strip('`"\'')
+                    else:
+                        f = 'autor'
+            field_name = f.strip('`"')
+            fields.append(field_name)
+            if alias:
+                field_aliases[alias] = field_name
+        result["fields"] = fields
+        result["field_aliases"] = field_aliases
+        if 'id' not in fields and any('id' in x.lower() for x in fields_str.split(',')):
+            fields.append('id')
+            result["fields"] = fields
     
     def _parse_sql_query(self, query: str, params: Optional[Tuple] = None) -> Dict[str, Any]:
         """
         Parsear una consulta SQL simple y convertirla a operaciones JSON
         Soporta: SELECT, INSERT, UPDATE, DELETE, CREATE TABLE básicos
         """
-        query = query.strip()
+        query = re.sub(r'\s+', ' ', query.strip())
         query_upper = query.upper()
-        
-        # Normalizar espacios
-        query = re.sub(r'\s+', ' ', query)
-        
-        # Manejar CREATE TABLE IF NOT EXISTS (simplemente retornar éxito)
+
         if query_upper.startswith('CREATE TABLE'):
             return {
                 "operation": "CREATE_TABLE",
                 "table": None
             }
-        
-        result = {
+
+        result: Dict[str, Any] = {
             "operation": None,
             "table": None,
             "where": [],
             "fields": [],
-            "field_aliases": {},  # Mapeo de alias a campos reales
+            "field_aliases": {},
             "values": [],
             "set_fields": {},
             "order_by": None,
             "limit": None,
             "offset": None
         }
-        
-        # Detectar operación
+
         if query_upper.startswith('SELECT'):
-            result["operation"] = "SELECT"
-            # Extraer campos
-            select_match = re.search(r'SELECT\s+(.*?)\s+FROM', query, re.IGNORECASE)
-            if select_match:
-                fields_str = select_match.group(1).strip()
-                if fields_str == '*':
-                    result["fields"] = ['*']
-                elif 'COUNT' in fields_str.upper():
-                    # Manejar COUNT(*)
-                    result["fields"] = ['COUNT(*)']
-                else:
-                    # Limpiar campos (remover funciones, alias, backticks, prefijos de tabla, etc.)
-                    fields = []
-                    field_aliases = {}  # Mapear alias a campo real
-                    for f in fields_str.split(','):
-                        f = f.strip()
-                        # Remover backticks y comillas
-                        f = f.strip('`"')
-                        
-                        # Extraer alias si existe (campo AS alias)
-                        alias = None
-                        if ' AS ' in f.upper():
-                            parts = f.split(' AS ', 1)
-                            if len(parts) >= 2:
-                                f = parts[0].strip()
-                                alias = parts[1].strip().strip('`"')
-                        
-                        # Remover prefijo de tabla (n.id -> id, u.nombre -> nombre)
-                        if '.' in f:
-                            f = f.split('.')[-1]
-                        
-                        # Remover funciones básicas (COALESCE, etc.)
-                        if '(' in f and ')' in f:
-                            # Es una función (COALESCE, etc.)
-                            # Extraer el campo dentro de la función
-                            # COALESCE(u.nombre, n.autor) -> extraer el primer campo disponible
-                            match = re.findall(r'(\w+)\.(\w+)', f)
-                            if match:
-                                # Si hay múltiples campos en la función, usar el primero disponible
-                                # Buscar en la tabla principal primero (prefijo 'n')
-                                for table_prefix, field_name in match:
-                                    # Preferir campos de la tabla principal (prefijo 'n')
-                                    if table_prefix.lower() == 'n':
-                                        f = field_name
-                                        break
-                                else:
-                                    # Si no hay de la tabla principal, usar el primero
-                                    f = match[0][1]
-                            else:
-                                # Intentar extraer campo simple dentro de paréntesis
-                                inner_match = re.search(r'\(([^)]+)\)', f)
-                                if inner_match:
-                                    inner = inner_match.group(1).strip()
-                                    # Dividir por comas para COALESCE con múltiples argumentos
-                                    inner_parts = [p.strip() for p in inner.split(',')]
-                                    for part in inner_parts:
-                                        if '.' in part:
-                                            field_part = part.split('.')[-1].strip()
-                                            # Preferir campos que no sean strings literales
-                                            if not (field_part.startswith("'") or field_part.startswith('"')):
-                                                f = field_part
-                                                break
-                                    else:
-                                        # Si no se encontró, usar el primero sin prefijo
-                                        if inner_parts:
-                                            first = inner_parts[0].strip()
-                                            if '.' in first:
-                                                f = first.split('.')[-1]
-                                            else:
-                                                f = first.strip('`"\'')
-                                else:
-                                    # Si no se puede extraer, usar un campo por defecto común
-                                    f = 'autor'  # Campo común en noticias
-                        
-                        # Guardar el campo real
-                        field_name = f.strip('`"')
-                        fields.append(field_name)
-                        
-                        # Si hay alias, mapearlo al campo real
-                        if alias:
-                            field_aliases[alias] = field_name
-                    
-                    result["fields"] = fields
-                    result["field_aliases"] = field_aliases
-                    
-                    # Asegurar que 'id' siempre esté en los campos si se solicitó
-                    # (necesario para operaciones posteriores que dependen de 'id')
-                    if 'id' not in fields and any('id' in f.lower() for f in fields_str.split(',')):
-                        fields.append('id')
-                        result["fields"] = fields
-            
-            # Extraer tabla (manejar backticks y alias de tabla)
-            # Ejemplo: FROM noticias_nul n -> extraer "noticias_nul"
-            # También manejar: FROM `noticias_nul` n LEFT JOIN ...
-            from_match = re.search(r'FROM\s+[`"]?(\w+)[`"]?\s*\w*', query, re.IGNORECASE)
-            if from_match:
-                result["table"] = from_match.group(1)
-            
-            # Extraer WHERE
-            where_match = re.search(
-                r'WHERE\s+(.+?)(?=\s+ORDER\s+BY|\s+LIMIT\b|$)',
-                query,
-                re.IGNORECASE | re.DOTALL,
-            )
-            if where_match:
-                where_clause = where_match.group(1).strip()
-                result["where"] = self._parse_where_clause(where_clause, params)
-            
-            # Extraer ORDER BY
-            order_match = re.search(r'ORDER\s+BY\s+(\w+)(?:\s+(ASC|DESC))?(?:\s+LIMIT|$)', query, re.IGNORECASE)
-            if order_match:
-                result["order_by"] = {
-                    "field": order_match.group(1),
-                    "direction": order_match.group(2) if order_match.group(2) else "ASC"
-                }
-            
-            # Extraer LIMIT y OFFSET
-            limit_match = re.search(r'LIMIT\s+(\d+)(?:\s+OFFSET\s+(\d+))?', query, re.IGNORECASE)
-            if limit_match:
-                result["limit"] = int(limit_match.group(1))
-                if limit_match.group(2):
-                    result["offset"] = int(limit_match.group(2))
-        
+            self._fill_parse_select(query, result, params)
         elif query_upper.startswith('INSERT'):
-            result["operation"] = "INSERT"
-            # Extraer tabla (manejar backticks)
-            insert_match = re.search(r'INSERT\s+INTO\s+[`"]?(\w+)[`"]?', query, re.IGNORECASE)
-            if insert_match:
-                result["table"] = insert_match.group(1)
-            
-            # Extraer campos (manejar backticks)
-            fields_match = re.search(r'\(([^)]+)\)', query)
-            if fields_match:
-                fields_str = fields_match.group(1)
-                # Remover backticks y comillas de los campos
-                result["fields"] = [f.strip().strip('`"') for f in fields_str.split(',')]
-            
-            # Extraer valores (VALUES o usar params)
-            if params:
-                result["values"] = params
-            else:
-                values_match = re.search(r'VALUES\s*\(([^)]+)\)', query, re.IGNORECASE)
-                if values_match:
-                    # Parsear valores simples (sin comillas)
-                    values_str = values_match.group(1)
-                    result["values"] = [v.strip().strip("'\"") for v in values_str.split(',')]
-        
+            self._fill_parse_insert(query, result, params)
         elif query_upper.startswith('UPDATE'):
-            result["operation"] = "UPDATE"
-            # Extraer tabla (manejar backticks)
-            update_match = re.search(r'UPDATE\s+[`"]?(\w+)[`"]?', query, re.IGNORECASE)
-            if update_match:
-                result["table"] = update_match.group(1)
-            
-            # Extraer SET
-            set_match = re.search(
-                r'SET\s+(.+?)(?=\s+WHERE\b|$)',
-                query,
-                re.IGNORECASE | re.DOTALL,
-            )
-            if set_match:
-                set_clause = set_match.group(1).strip()
-                # Parsear SET campo = valor
-                set_parts = set_clause.split(',')
-                for part in set_parts:
-                    if '=' in part:
-                        field, value = part.split('=', 1)
-                        result["set_fields"][field.strip()] = value.strip().strip("'\"")
-            
-            # Extraer WHERE
-            where_match = re.search(r'WHERE\s+(.+)$', query, re.IGNORECASE | re.DOTALL)
-            if where_match:
-                where_clause = where_match.group(1).strip()
-                result["where"] = self._parse_where_clause(where_clause, params)
-        
+            self._fill_parse_update(query, result, params)
         elif query_upper.startswith('DELETE'):
-            result["operation"] = "DELETE"
-            # Extraer tabla (manejar backticks)
-            delete_match = re.search(r'FROM\s+[`"]?(\w+)[`"]?', query, re.IGNORECASE)
-            if delete_match:
-                result["table"] = delete_match.group(1)
-            
-            # Extraer WHERE
-            where_match = re.search(r'WHERE\s+(.+)$', query, re.IGNORECASE | re.DOTALL)
-            if where_match:
-                where_clause = where_match.group(1).strip()
-                result["where"] = self._parse_where_clause(where_clause, params)
-        
+            self._fill_parse_delete(query, result, params)
+
         return result
-    
+
+    def _fill_parse_select(self, query: str, result: Dict[str, Any], params: Optional[Tuple]) -> None:
+        result["operation"] = "SELECT"
+        select_match = re.search(r'SELECT\s+(.*?)\s+FROM', query, re.IGNORECASE)
+        if select_match:
+            self._parse_select_column_clause(result, select_match.group(1).strip())
+
+        from_match = re.search(r'FROM\s+[`"]?(\w+)[`"]?\s*\w*', query, re.IGNORECASE)
+        if from_match:
+            result["table"] = from_match.group(1)
+
+        where_match = re.search(
+            r'WHERE\s+(.+)(?=\s+ORDER\s+BY|\s+LIMIT\b|$)',
+            query,
+            re.IGNORECASE | re.DOTALL,
+        )
+        if where_match:
+            where_clause = where_match.group(1).strip()
+            result["where"] = self._parse_where_clause(where_clause, params)
+
+        order_match = re.search(r'ORDER\s+BY\s+(\w+)(?:\s+(ASC|DESC))?(?:\s+LIMIT|$)', query, re.IGNORECASE)
+        if order_match:
+            result["order_by"] = {
+                "field": order_match.group(1),
+                "direction": order_match.group(2) if order_match.group(2) else "ASC"
+            }
+
+        limit_match = re.search(r'LIMIT\s+(\d+)(?:\s+OFFSET\s+(\d+))?', query, re.IGNORECASE)
+        if limit_match:
+            result["limit"] = int(limit_match.group(1))
+            if limit_match.group(2):
+                result["offset"] = int(limit_match.group(2))
+
+    def _fill_parse_insert(self, query: str, result: Dict[str, Any], params: Optional[Tuple]) -> None:
+        result["operation"] = "INSERT"
+        insert_match = re.search(r'INSERT\s+INTO\s+[`"]?(\w+)[`"]?', query, re.IGNORECASE)
+        if insert_match:
+            result["table"] = insert_match.group(1)
+
+        fields_match = re.search(r'\(([^)]+)\)', query)
+        if fields_match:
+            fields_str = fields_match.group(1)
+            result["fields"] = [f.strip().strip('`"') for f in fields_str.split(',')]
+
+        if params:
+            result["values"] = params
+        else:
+            values_match = re.search(r'VALUES\s*\(([^)]+)\)', query, re.IGNORECASE)
+            if values_match:
+                values_str = values_match.group(1)
+                result["values"] = [v.strip().strip("'\"") for v in values_str.split(',')]
+
+    def _fill_parse_update(self, query: str, result: Dict[str, Any], params: Optional[Tuple]) -> None:
+        result["operation"] = "UPDATE"
+        update_match = re.search(r'UPDATE\s+[`"]?(\w+)[`"]?', query, re.IGNORECASE)
+        if update_match:
+            result["table"] = update_match.group(1)
+
+        set_match = re.search(
+            r'SET\s+(.+)(?=\s+WHERE\b|$)',
+            query,
+            re.IGNORECASE | re.DOTALL,
+        )
+        if set_match:
+            set_clause = set_match.group(1).strip()
+            set_parts = set_clause.split(',')
+            for part in set_parts:
+                if '=' in part:
+                    field, value = part.split('=', 1)
+                    result["set_fields"][field.strip()] = value.strip().strip("'\"")
+
+        where_match = re.search(r'WHERE\s+(.+)$', query, re.IGNORECASE | re.DOTALL)
+        if where_match:
+            where_clause = where_match.group(1).strip()
+            result["where"] = self._parse_where_clause(where_clause, params)
+
+    def _fill_parse_delete(self, query: str, result: Dict[str, Any], params: Optional[Tuple]) -> None:
+        result["operation"] = "DELETE"
+        delete_match = re.search(r'FROM\s+[`"]?(\w+)[`"]?', query, re.IGNORECASE)
+        if delete_match:
+            result["table"] = delete_match.group(1)
+
+        where_match = re.search(r'WHERE\s+(.+)$', query, re.IGNORECASE | re.DOTALL)
+        if where_match:
+            where_clause = where_match.group(1).strip()
+            result["where"] = self._parse_where_clause(where_clause, params)
+
+    def _parse_where_part(
+        self, part: str, params: Optional[Tuple], param_index: int
+    ) -> Tuple[Optional[Dict[str, Any]], int]:
+        part = part.strip()
+        for op in ['!=', '<=', '>=', '=', '<', '>', SQL_LIKE_TOKEN, SQL_IN_TOKEN]:
+            op_clean = op.strip()
+            if not (op_clean in part.upper() or op in part):
+                continue
+            if op == SQL_LIKE_TOKEN:
+                op_pos = part.upper().find(SQL_LIKE_TOKEN.upper())
+                op_used = 'LIKE'
+            elif op == SQL_IN_TOKEN:
+                op_pos = part.upper().find(SQL_IN_TOKEN.upper())
+                op_used = 'IN'
+            else:
+                op_pos = part.find(op)
+                op_used = op_clean
+
+            if op_pos == -1:
+                continue
+
+            field = part[:op_pos].strip().strip('`"')
+            if '.' in field:
+                field = field.split('.')[-1]
+            value = part[op_pos + len(op):].strip()
+
+            if value == '%s' and params and param_index < len(params):
+                value = params[param_index]
+                param_index += 1
+            elif value.startswith('(') and value.endswith(')'):
+                value = value[1:-1].strip()
+                if params and param_index < len(params):
+                    value = params[param_index]
+                    param_index += 1
+                else:
+                    value = [v.strip().strip("'\"") for v in value.split(',')]
+            else:
+                value = value.strip("'\"")
+
+            return ({
+                "field": field,
+                "operator": op_used,
+                "value": value
+            }, param_index)
+
+        return (None, param_index)
+
     def _parse_where_clause(self, where_clause: str, params: Optional[Tuple] = None) -> List[Dict[str, Any]]:
         """Parsear cláusula WHERE simple"""
-        conditions = []
+        conditions: List[Dict[str, Any]] = []
         param_index = 0
-        
-        # Dividir por AND (manejar AND en mayúsculas y minúsculas)
         and_parts = re.split(r'\s+AND\s+', where_clause, flags=re.IGNORECASE)
-        for part in and_parts:
-            part = part.strip()
-            # Buscar operadores: =, !=, <, >, <=, >=, LIKE, IN
-            for op in ['!=', '<=', '>=', '=', '<', '>', SQL_LIKE_TOKEN, SQL_IN_TOKEN]:
-                op_clean = op.strip()
-                if op_clean in part.upper() or op in part:
-                    # Encontrar la posición del operador
-                    if op == SQL_LIKE_TOKEN:
-                        op_pos = part.upper().find(SQL_LIKE_TOKEN.upper())
-                        op_used = 'LIKE'
-                    elif op == SQL_IN_TOKEN:
-                        op_pos = part.upper().find(SQL_IN_TOKEN.upper())
-                        op_used = 'IN'
-                    else:
-                        op_pos = part.find(op)
-                        op_used = op_clean
-                    
-                    if op_pos != -1:
-                        field = part[:op_pos].strip()
-                        # Remover backticks y comillas si existen
-                        field = field.strip('`"')
-                        # Remover prefijo de tabla (n.id -> id, u.nombre -> nombre)
-                        if '.' in field:
-                            field = field.split('.')[-1]
-                        value = part[op_pos + len(op):].strip()
-                        
-                        # Si es %s, usar parámetro
-                        if value == '%s' and params and param_index < len(params):
-                            value = params[param_index]
-                            param_index += 1
-                        elif value.startswith('(') and value.endswith(')'):
-                            # Manejar IN (val1, val2, ...)
-                            value = value[1:-1].strip()
-                            if params and param_index < len(params):
-                                value = params[param_index]
-                                param_index += 1
-                            else:
-                                # Parsear valores del IN
-                                value = [v.strip().strip("'\"") for v in value.split(',')]
-                        else:
-                            # Remover comillas
-                            value = value.strip("'\"")
-                        
-                        conditions.append({
-                            "field": field,
-                            "operator": op_used,
-                            "value": value
-                        })
-                        break
-        
+        for raw_part in and_parts:
+            cond, param_index = self._parse_where_part(raw_part, params, param_index)
+            if cond:
+                conditions.append(cond)
         return conditions
     
+    def _where_compare(self, operator: str, record_value, value) -> bool:
+        if operator == '=':
+            return str(record_value) == str(value)
+        if operator == '!=':
+            return str(record_value) != str(value)
+        if operator == 'LIKE':
+            pattern = str(value).replace('%', '.*').replace('_', '.')
+            return bool(re.search(pattern, str(record_value), re.IGNORECASE))
+        if operator == 'IN':
+            if isinstance(value, list):
+                return str(record_value) in [str(v) for v in value]
+            return str(record_value) == str(value)
+        if operator == '<':
+            return record_value < value
+        if operator == '>':
+            return record_value > value
+        if operator == '<=':
+            return record_value <= value
+        if operator == '>=':
+            return record_value >= value
+        return False
+
+    def _record_matches_where(self, record: Dict, conditions: List[Dict]) -> bool:
+        for condition in conditions:
+            field = condition["field"]
+            if field not in record:
+                return False
+            if not self._where_compare(
+                condition["operator"], record[field], condition["value"]
+            ):
+                return False
+        return True
+
     def _apply_where(self, records: List[Dict], conditions: List[Dict]) -> List[Dict]:
         """Aplicar condiciones WHERE a los registros"""
         if not conditions:
             return records
-        
-        filtered = []
+        return [r for r in records if self._record_matches_where(r, conditions)]
+
+    def _json_missing_table(self, fetch_one: bool, fetch_all: bool):
+        logger.warning("Tabla no encontrada en almacén JSON")
+        if fetch_all:
+            return []
+        return None
+
+    def _json_select_order_limit(self, records: List[Dict], parsed: Dict) -> List[Dict]:
+        if parsed.get("order_by"):
+            field = parsed["order_by"]["field"]
+            if '.' in field:
+                field = field.split('.')[-1]
+            reverse = parsed["order_by"]["direction"].upper() == "DESC"
+            records.sort(key=lambda x: x.get(field, ''), reverse=reverse)
+        if parsed.get("offset"):
+            records = records[parsed["offset"]:]
+        if parsed.get("limit"):
+            records = records[:parsed["limit"]]
+        return records
+
+    def _json_select_project_fields(self, records: List[Dict], parsed: Dict) -> List[Dict]:
+        if not parsed["fields"] or parsed["fields"] == ['*']:
+            return records
+        out = []
+        aliases = parsed.get("field_aliases", {})
         for record in records:
-            match = True
-            for condition in conditions:
-                field = condition["field"]
-                operator = condition["operator"]
-                value = condition["value"]
-                
-                if field not in record:
-                    match = False
-                    break
-                
-                record_value = record[field]
-                
-                if operator == '=':
-                    if str(record_value) != str(value):
-                        match = False
-                        break
-                elif operator == '!=':
-                    if str(record_value) == str(value):
-                        match = False
-                        break
-                elif operator == 'LIKE':
-                    # Convertir SQL LIKE a regex
-                    pattern = value.replace('%', '.*').replace('_', '.')
-                    if not re.search(pattern, str(record_value), re.IGNORECASE):
-                        match = False
-                        break
-                elif operator == 'IN':
-                    # Manejar IN (val1, val2, ...)
-                    if isinstance(value, list):
-                        if str(record_value) not in [str(v) for v in value]:
-                            match = False
-                            break
-                    else:
-                        if str(record_value) != str(value):
-                            match = False
-                            break
-                elif operator == '<':
-                    if record_value >= value:
-                        match = False
-                        break
-                elif operator == '>':
-                    if record_value <= value:
-                        match = False
-                        break
-                elif operator == '<=':
-                    if record_value > value:
-                        match = False
-                        break
-                elif operator == '>=':
-                    if record_value < value:
-                        match = False
-                        break
-            
-            if match:
-                filtered.append(record)
-        
-        return filtered
+            row = {f: record.get(f) for f in parsed["fields"]}
+            for alias, real in aliases.items():
+                row[alias] = record.get(real)
+            if 'id' in record and 'id' not in row:
+                row['id'] = record['id']
+            out.append(row)
+        return out
+
+    def _json_select_return(self, records: List[Dict], fetch_one: bool, fetch_all: bool):
+        if fetch_all:
+            return records
+        if fetch_one:
+            return records[0] if records else None
+        return records[0] if records else None
+
+    def _json_op_select(
+        self, query: str, table: str, parsed: Dict, _params: Optional[Tuple],
+        fetch_one: bool, fetch_all: bool,
+    ):
+        if 'JOIN' in query.upper():
+            records = self._handle_join_query(query, parsed)
+        else:
+            records = self._data[table].copy()
+            if parsed["where"]:
+                records = self._apply_where(records, parsed["where"])
+        records = self._json_select_order_limit(records, parsed)
+        if parsed["fields"] and parsed["fields"][0] == 'COUNT(*)':
+            return len(records)
+        records = self._json_select_project_fields(records, parsed)
+        return self._json_select_return(records, fetch_one, fetch_all)
+
+    def _json_build_insert_row(self, parsed: Dict, params: Optional[Tuple]) -> Dict:
+        new_record = {}
+        if params:
+            for i, field in enumerate(parsed["fields"]):
+                if i < len(params):
+                    new_record[field] = params[i]
+        else:
+            for i, field in enumerate(parsed["fields"]):
+                if i < len(parsed["values"]):
+                    new_record[field] = parsed["values"][i]
+        return new_record
+
+    def _json_insert_timestamps(self, table: str, new_record: Dict) -> None:
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        if table == "noticias_nul":
+            if "fecha" not in new_record:
+                new_record["fecha"] = ts
+            return
+        struct = self._get_table_structure(table)
+        if "fecha_creacion" not in new_record and "fecha_creacion" in struct:
+            new_record["fecha_creacion"] = ts
+        elif "fecha" not in new_record and "fecha" in struct:
+            new_record["fecha"] = ts
+
+    def _json_op_insert(self, table: str, parsed: Dict, params: Optional[Tuple]):
+        new_record = self._json_build_insert_row(parsed, params)
+        id_field = self._get_id_field(table)
+        if id_field and id_field not in new_record:
+            new_record[id_field] = self._get_next_id(table)
+        self._json_insert_timestamps(table, new_record)
+        self._data[table].append(new_record)
+        self._save_data()
+        if id_field:
+            return new_record.get(id_field, len(self._data[table]))
+        return True
+
+    def _json_op_update(self, table: str, parsed: Dict, params: Optional[Tuple]) -> int:
+        records = self._data[table]
+        if parsed["where"]:
+            matching = self._apply_where(records, parsed["where"])
+            indices = [i for i, r in enumerate(records) if r in matching]
+        else:
+            indices = list(range(len(records)))
+        for idx in indices:
+            for field, value in parsed["set_fields"].items():
+                if value == '%s' and params:
+                    value = params[0]
+                records[idx][field] = value
+        self._save_data()
+        return len(indices)
+
+    def _json_op_delete(self, table: str, parsed: Dict) -> int:
+        records = self._data[table]
+        if parsed["where"]:
+            matching = self._apply_where(records, parsed["where"])
+            to_del = [i for i, r in enumerate(records) if r in matching]
+        else:
+            to_del = list(range(len(records)))
+        for idx in sorted(to_del, reverse=True):
+            del records[idx]
+        self._save_data()
+        return len(to_del)
     
     def execute_query(self, query: str, params: Optional[Tuple] = None, 
                      fetch_one: bool = False, fetch_all: bool = False):
@@ -461,176 +510,25 @@ class DatabaseJSON:
                 table = parsed["table"]
                 
                 if not table or table not in self._data:
-                    logger.warning(f"Tabla {table} no encontrada")
-                    return None if not fetch_one and not fetch_all else ([] if fetch_all else None)
+                    return self._json_missing_table(fetch_one, fetch_all)
                 
                 if operation == "SELECT":
-                    # Verificar si hay JOIN en la consulta
-                    if 'JOIN' in query.upper():
-                        # Manejar JOINs básicos
-                        records = self._handle_join_query(query, params, parsed)
-                    else:
-                        # Consulta normal sin JOIN
-                        records = self._data[table].copy()
-                        
-                        # Aplicar WHERE
-                        if parsed["where"]:
-                            records = self._apply_where(records, parsed["where"])
-                    
-                    # Aplicar ORDER BY (tanto para JOIN como para consultas normales)
-                    if parsed.get("order_by"):
-                        field = parsed["order_by"]["field"]
-                        # Remover prefijo de tabla si existe
-                        if '.' in field:
-                            field = field.split('.')[-1]
-                        direction = parsed["order_by"]["direction"]
-                        reverse = (direction.upper() == "DESC")
-                        records.sort(key=lambda x: x.get(field, ''), reverse=reverse)
-                    
-                    # Aplicar LIMIT y OFFSET (tanto para JOIN como para consultas normales)
-                    if parsed.get("offset"):
-                        records = records[parsed["offset"]:]
-                    if parsed.get("limit"):
-                        records = records[:parsed["limit"]]
-                    
-                    # Manejar COUNT(*)
-                    if parsed["fields"] and parsed["fields"][0] == 'COUNT(*)':
-                        return len(records)
-                    
-                    # Filtrar campos si no es *
-                    if parsed["fields"] and parsed["fields"] != ['*']:
-                        filtered_records = []
-                        field_aliases = parsed.get("field_aliases", {})
-                        for record in records:
-                            filtered_record = {}
-                            # Agregar campos solicitados
-                            for field in parsed["fields"]:
-                                if field in record:
-                                    filtered_record[field] = record[field]
-                                else:
-                                    # Si el campo no existe, intentar con None
-                                    filtered_record[field] = None
-                            
-                            # Agregar alias si existen (el alias apunta al campo real)
-                            for alias, real_field in field_aliases.items():
-                                if real_field in record:
-                                    filtered_record[alias] = record[real_field]
-                                else:
-                                    # Si el campo real no existe, usar None o valor por defecto
-                                    # Para COALESCE, usar el primer valor disponible o None
-                                    filtered_record[alias] = None
-                            
-                            # Asegurar que 'id' siempre esté presente si existe en el registro original
-                            # (necesario para operaciones posteriores)
-                            if 'id' in record and 'id' not in filtered_record:
-                                filtered_record['id'] = record['id']
-                            
-                            filtered_records.append(filtered_record)
-                        records = filtered_records
-                    else:
-                        # Si es *, asegurar que todos los campos estén presentes
-                        # (ya están, no hacer nada)
-                        pass
-                    
-                    if fetch_one:
-                        return records[0] if records else None
-                    elif fetch_all:
-                        return records
-                    else:
-                        return records[0] if records else None
-                
-                elif operation == "INSERT":
-                    # Crear nuevo registro
-                    new_record = {}
-                    
-                    # Mapear campos con valores
-                    if params:
-                        for i, field in enumerate(parsed["fields"]):
-                            if i < len(params):
-                                new_record[field] = params[i]
-                    else:
-                        for i, field in enumerate(parsed["fields"]):
-                            if i < len(parsed["values"]):
-                                new_record[field] = parsed["values"][i]
-                    
-                    # Generar ID automático
-                    id_field = self._get_id_field(table)
-                    if id_field and id_field not in new_record:
-                        new_record[id_field] = self._get_next_id(table)
-                    
-                    # Agregar timestamp si es fecha_creacion o fecha
-                    # Para noticias_nul, siempre agregar fecha si no existe
-                    if table == "noticias_nul":
-                        if "fecha" not in new_record:
-                            new_record["fecha"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    elif "fecha_creacion" not in new_record and "fecha_creacion" in self._get_table_structure(table):
-                        new_record["fecha_creacion"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    elif "fecha" not in new_record and "fecha" in self._get_table_structure(table):
-                        new_record["fecha"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    
-                    self._data[table].append(new_record)
-                    self._save_data()
-                    
-                    # Retornar ID del nuevo registro (o True si no hay ID field, como en noticias_categorias)
-                    if id_field:
-                        return new_record.get(id_field, len(self._data[table]))
-                    else:
-                        # Para tablas sin ID autoincremental (como noticias_categorias), retornar True
-                        return True
-                
-                elif operation == "UPDATE":
-                    records = self._data[table]
-                    updated_count = 0
-                    
-                    # Aplicar WHERE para encontrar registros
-                    if parsed["where"]:
-                        matching_records = self._apply_where(records, parsed["where"])
-                        indices = [i for i, r in enumerate(records) if r in matching_records]
-                    else:
-                        indices = list(range(len(records)))
-                    
-                    # Actualizar registros
-                    for idx in indices:
-                        for field, value in parsed["set_fields"].items():
-                            # Si el valor es %s, usar parámetro
-                            if value == '%s' and params:
-                                value = params[0] if params else value
-                            records[idx][field] = value
-                        updated_count += 1
-                    
-                    self._save_data()
-                    return updated_count
-                
-                elif operation == "DELETE":
-                    records = self._data[table]
-                    deleted_count = 0
-                    
-                    # Aplicar WHERE para encontrar registros
-                    if parsed["where"]:
-                        matching_records = self._apply_where(records, parsed["where"])
-                        indices_to_delete = [i for i, r in enumerate(records) if r in matching_records]
-                    else:
-                        indices_to_delete = list(range(len(records)))
-                    
-                    # Eliminar en orden inverso para no afectar índices
-                    for idx in sorted(indices_to_delete, reverse=True):
-                        del records[idx]
-                        deleted_count += 1
-                    
-                    self._save_data()
-                    return deleted_count
-                
-                elif operation == "CREATE_TABLE":
-                    # CREATE TABLE IF NOT EXISTS - solo verificar que la tabla existe
-                    # Las tablas se crean automáticamente si no existen
+                    return self._json_op_select(
+                        query, table, parsed, params, fetch_one, fetch_all
+                    )
+                if operation == "INSERT":
+                    return self._json_op_insert(table, parsed, params)
+                if operation == "UPDATE":
+                    return self._json_op_update(table, parsed, params)
+                if operation == "DELETE":
+                    return self._json_op_delete(table, parsed)
+                if operation == "CREATE_TABLE":
                     return True
-                
-                else:
-                    logger.warning(f"Operación no soportada: {operation}")
-                    return None
+                logger.warning("Operación no soportada: %s", operation)
+                return None
                     
             except Exception as e:
-                logger.error(f"Error al ejecutar consulta JSON: {e}")
+                logger.error("Error al ejecutar consulta JSON: %s", e)
                 import traceback
                 logger.error(traceback.format_exc())
                 raise
@@ -715,8 +613,93 @@ class DatabaseJSON:
     def get_connection(self):
         """Método de compatibilidad - retorna self para simular conexión"""
         return self
-    
-    def _handle_join_query(self, query: str, params: Optional[Tuple], parsed: Dict) -> List[Dict]:
+
+    def _join_match_pattern(self, query: str):
+        join_pattern = (
+            r'FROM\s+(\w+)\s+\w+\s+(?:LEFT\s+)?JOIN\s+(\w+)\s+\w+\s+ON\s+'
+            r'(.+)(?=\s+WHERE\b|\s+ORDER\s+BY\b|\s+LIMIT\b|$)'
+        )
+        return re.search(join_pattern, query, re.IGNORECASE)
+
+    def _join_resolve_main_join_fields(self, join_condition: str) -> Optional[Tuple[str, str]]:
+        join_parts = join_condition.split('=')
+        if len(join_parts) != 2:
+            return None
+        left_part = join_parts[0].strip()
+        right_part = join_parts[1].strip()
+        left_prefix = left_part.split('.')[0] if '.' in left_part else None
+        right_prefix = right_part.split('.')[0] if '.' in right_part else None
+        main_field_part = left_part
+        join_field_part = right_part
+        if right_prefix and right_prefix.lower() in ['n', 'c'] and left_prefix and left_prefix.lower() in ['u', 'nc']:
+            main_field_part = right_part
+            join_field_part = left_part
+        main_field = main_field_part.split('.')[-1]
+        join_field = join_field_part.split('.')[-1]
+        return main_field, join_field
+
+    def _join_filter_main_records(
+        self, main_records: List[Dict], where_conditions: List[Dict]
+    ) -> List[Dict]:
+        if not where_conditions:
+            return main_records
+        adjusted_where = []
+        for cond in where_conditions:
+            adj_cond = cond.copy()
+            if '.' in adj_cond.get("field", ""):
+                adj_cond["field"] = adj_cond["field"].split('.')[-1]
+            adjusted_where.append(adj_cond)
+        return self._apply_where(main_records, adjusted_where)
+
+    def _join_combine_rows(
+        self,
+        filtered_main: List[Dict],
+        join_records: List[Dict],
+        main_field: str,
+        join_field: str,
+        is_left_join: bool,
+    ) -> List[Dict]:
+        result = []
+        for main_rec in filtered_main:
+            main_value = main_rec.get(main_field)
+            matched_join_rec = None
+            for join_rec in join_records:
+                if join_rec.get(join_field) == main_value:
+                    matched_join_rec = join_rec
+                    break
+            if not matched_join_rec and not is_left_join:
+                continue
+            combined = main_rec.copy()
+            if matched_join_rec:
+                for key, value in matched_join_rec.items():
+                    if key not in combined:
+                        combined[key] = value
+            result.append(combined)
+        return result
+
+    def _join_project_join_fields(self, result: List[Dict], parsed: Dict) -> List[Dict]:
+        if not parsed.get("fields") or parsed["fields"] == ['*']:
+            return result
+        filtered_result = []
+        field_aliases = parsed.get("field_aliases", {})
+        for record in result:
+            filtered_record = {}
+            for field in parsed["fields"]:
+                clean_field = field.split('.')[-1]
+                if clean_field in record:
+                    filtered_record[clean_field] = record[clean_field]
+                else:
+                    filtered_record[clean_field] = None
+            for alias, real_field in field_aliases.items():
+                clean_real_field = real_field.split('.')[-1] if '.' in real_field else real_field
+                if clean_real_field in record:
+                    filtered_record[alias] = record[clean_real_field]
+                else:
+                    filtered_record[alias] = None
+            filtered_result.append(filtered_record)
+        return filtered_result
+
+    def _handle_join_query(self, query: str, parsed: Dict) -> List[Dict]:
         """
         Manejar consultas con JOINs básicos (INNER JOIN y LEFT JOIN)
         Ejemplo 1: SELECT c.id, c.nombre, c.color FROM categorias_nul c JOIN noticias_categorias nc ON c.id = nc.categoria_id WHERE nc.noticia_id = %s
@@ -724,141 +707,37 @@ class DatabaseJSON:
         """
         try:
             query_upper = query.upper()
-            
-            # Detectar JOIN (INNER o LEFT)
-            if 'JOIN' in query_upper:
-                is_left_join = 'LEFT JOIN' in query_upper
-                
-                # Extraer tablas del JOIN (manejar LEFT JOIN y JOIN normal)
-                # FROM noticias_nul n LEFT JOIN usuarios_nul u ON n.autor = u.usuario WHERE n.id = %s
-                # FROM categorias_nul c JOIN noticias_categorias nc ON c.id = nc.categoria_id WHERE nc.noticia_id = %s
-                # Capturar hasta WHERE, ORDER BY, LIMIT o el final
-                join_pattern = (
-                    r'FROM\s+(\w+)\s+\w+\s+(?:LEFT\s+)?JOIN\s+(\w+)\s+\w+\s+ON\s+'
-                    r'(.+)(?=\s+WHERE\b|\s+ORDER\s+BY\b|\s+LIMIT\b|$)'
-                )
-                join_match = re.search(join_pattern, query, re.IGNORECASE)
-                if join_match:
-                    logger.debug(f"[JOIN] Match encontrado: main_table={join_match.group(1)}, join_table={join_match.group(2)}, is_left={is_left_join}")
-                    main_table = join_match.group(1)
-                    join_table = join_match.group(2)
-                    join_condition = join_match.group(3).strip()
-                    
-                    # Parsear condición del JOIN (ej: n.autor = u.usuario o c.id = nc.categoria_id)
-                    join_parts = join_condition.split('=')
-                    if len(join_parts) == 2:
-                        # Determinar qué campo pertenece a cada tabla
-                        left_part = join_parts[0].strip()
-                        right_part = join_parts[1].strip()
-                        
-                        # Extraer prefijos de tabla
-                        left_prefix = left_part.split('.')[0] if '.' in left_part else None
-                        right_prefix = right_part.split('.')[0] if '.' in right_part else None
-                        
-                        # Determinar qué campo pertenece a la tabla principal
-                        # La tabla principal es la primera en el FROM, así que su alias debería aparecer primero
-                        # Pero también podemos verificar comparando con los alias comunes (n, c, etc.)
-                        # Por ahora, asumimos que el primer campo es de la tabla principal
-                        main_field_part = left_part
-                        join_field_part = right_part
-                        
-                        # Si el prefijo derecho parece ser de la tabla principal, intercambiar
-                        # (esto es una heurística, pero funciona para la mayoría de casos)
-                        if right_prefix and right_prefix.lower() in ['n', 'c'] and left_prefix and left_prefix.lower() in ['u', 'nc']:
-                            main_field_part = right_part
-                            join_field_part = left_part
-                        
-                        # Determinar campos (remover prefijos de tabla)
-                        main_field = main_field_part.split('.')[-1]  # n.autor -> autor
-                        join_field = join_field_part.split('.')[-1]  # u.usuario -> usuario
-                        
-                        logger.debug(f"[JOIN] main_field={main_field}, join_field={join_field}, main_table={main_table}, join_table={join_table}")
-                        
-                        # Obtener registros de ambas tablas
-                        main_records = self._data.get(main_table, [])
-                        join_records = self._data.get(join_table, [])
-                        
-                        # Aplicar WHERE en la tabla principal primero
-                        where_conditions = parsed.get("where", [])
-                        filtered_main_records = main_records
-                        if where_conditions:
-                            # Ajustar WHERE para la tabla principal (n.id -> id)
-                            adjusted_where = []
-                            for cond in where_conditions:
-                                adj_cond = cond.copy()
-                                # Remover prefijo de tabla del campo
-                                if '.' in adj_cond.get("field", ""):
-                                    adj_cond["field"] = adj_cond["field"].split('.')[-1]
-                                adjusted_where.append(adj_cond)
-                            filtered_main_records = self._apply_where(main_records, adjusted_where)
-                        
-                        # Hacer el JOIN manualmente
-                        result = []
-                        logger.debug(f"[JOIN] Procesando {len(filtered_main_records)} registros de {main_table} con {len(join_records)} registros de {join_table}")
-                        for main_rec in filtered_main_records:
-                            # Obtener el valor del campo de la tabla principal
-                            main_value = main_rec.get(main_field)
-                            
-                            # Buscar coincidencia en la tabla de unión
-                            matched_join_rec = None
-                            for join_rec in join_records:
-                                if join_rec.get(join_field) == main_value:
-                                    matched_join_rec = join_rec
-                                    break
-                            
-                            # Para LEFT JOIN, incluir el registro principal incluso si no hay coincidencia
-                            # Para INNER JOIN, solo incluir si hay coincidencia
-                            if matched_join_rec or is_left_join:
-                                combined = main_rec.copy()
-                                
-                                # Agregar campos de la tabla de unión si existe coincidencia
-                                if matched_join_rec:
-                                    # Agregar campos de la tabla de unión (u.nombre, u.rol, etc.)
-                                    for key, value in matched_join_rec.items():
-                                        # Solo agregar si no existe en el registro principal o si es necesario
-                                        if key not in combined:
-                                            combined[key] = value
-                                
-                                result.append(combined)
-                        
-                        logger.debug(f"[JOIN] Resultado: {len(result)} registros después del JOIN")
-                        # Filtrar campos si se especificaron
-                        if parsed.get("fields") and parsed["fields"] != ['*']:
-                            filtered_result = []
-                            field_aliases = parsed.get("field_aliases", {})
-                            for record in result:
-                                filtered_record = {}
-                                for field in parsed["fields"]:
-                                    # Remover prefijo de tabla si existe
-                                    clean_field = field.split('.')[-1]
-                                    if clean_field in record:
-                                        filtered_record[clean_field] = record[clean_field]
-                                    else:
-                                        # Si el campo no existe, usar None (para COALESCE)
-                                        filtered_record[clean_field] = None
-                                
-                                # Agregar alias si existen
-                                for alias, real_field in field_aliases.items():
-                                    clean_real_field = real_field.split('.')[-1] if '.' in real_field else real_field
-                                    if clean_real_field in record:
-                                        filtered_record[alias] = record[clean_real_field]
-                                    else:
-                                        # Para COALESCE, usar el primer valor disponible o None
-                                        filtered_record[alias] = None
-                                
-                                filtered_result.append(filtered_record)
-                            result = filtered_result
-                        
-                        logger.debug(f"[JOIN] Retornando {len(result)} registros finales")
-                        return result
-                else:
-                    logger.warning("[JOIN] No se pudo analizar la cláusula JOIN de la consulta")
-            
-            # Si no se puede procesar, retornar vacío
-            logger.warning("[JOIN] No se detectó JOIN en la consulta")
-            return []
+            if 'JOIN' not in query_upper:
+                logger.warning("[JOIN] No se detectó JOIN en la consulta")
+                return []
+            is_left_join = 'LEFT JOIN' in query_upper
+            join_match = self._join_match_pattern(query)
+            if not join_match:
+                logger.warning("[JOIN] No se pudo analizar la cláusula JOIN de la consulta")
+                return []
+            main_table = join_match.group(1)
+            join_table = join_match.group(2)
+            join_condition = join_match.group(3).strip()
+            fields = self._join_resolve_main_join_fields(join_condition)
+            if not fields:
+                return []
+            main_field, join_field = fields
+            logger.debug(
+                "[JOIN] tablas=%s,%s campos=%s,%s left=%s",
+                main_table, join_table, main_field, join_field, is_left_join,
+            )
+            main_records = self._data.get(main_table, [])
+            join_records = self._data.get(join_table, [])
+            filtered_main = self._join_filter_main_records(main_records, parsed.get("where", []))
+            logger.debug("[JOIN] filas tras WHERE: main=%s join=%s", len(filtered_main), len(join_records))
+            result = self._join_combine_rows(
+                filtered_main, join_records, main_field, join_field, is_left_join
+            )
+            result = self._join_project_join_fields(result, parsed)
+            logger.debug("[JOIN] filas finales=%s", len(result))
+            return result
         except Exception as e:
-            logger.error(f"Error al procesar JOIN: {e}")
+            logger.error("Error al procesar JOIN: %s", e)
             import traceback
             logger.error(traceback.format_exc())
             return []

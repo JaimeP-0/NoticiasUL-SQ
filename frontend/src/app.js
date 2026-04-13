@@ -7,6 +7,61 @@
 let currentView = null;
 let appContainer = null;
 
+/** Slug URL a partir de título (compartido entre vistas). */
+function generarSlug(texto) {
+	if (!texto) return '';
+	return texto
+		.toString()
+		.toLowerCase()
+		.trim()
+		.replaceAll(/\s+/g, '-')
+		.normalize('NFD')
+		.replaceAll(/[\u0300-\u036f]/g, '')
+		.replaceAll(/[^a-z0-9-]/g, '')
+		.replaceAll(/-+/g, '-')
+		.replaceAll(/^-+|-+$/g, '')
+		.substring(0, 100)
+		.replaceAll(/-+$/, '');
+}
+
+async function obtenerUsuarioActualDesdeApi() {
+	try {
+		const res = await fetch('/api/auth/me', { credentials: 'include' });
+		if (!res.ok) return null;
+		const data = await res.json();
+		if (!data.authenticated) return null;
+		return { usuario: data.usuario, rol: data.rol || 'usuario' };
+	} catch (err) {
+		console.debug('[auth] No se pudo leer sesión (/api/auth/me):', err instanceof Error ? err.name : 'error');
+		return null;
+	}
+}
+
+async function obtenerNombreUsuarioSesion() {
+	const info = await obtenerUsuarioActualDesdeApi();
+	return info?.usuario ?? null;
+}
+
+function getRoleBadgeClass(rol) {
+	const classes = {
+		superadmin: 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200',
+		admin: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200',
+		maestro: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200',
+		usuario: 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200',
+	};
+	return classes[rol] || classes.usuario;
+}
+
+function getRoleLabel(rol) {
+	const labels = {
+		superadmin: 'Super Admin',
+		admin: 'Admin',
+		maestro: 'Maestro',
+		usuario: 'Usuario',
+	};
+	return labels[rol] || rol;
+}
+
 /**
  * Inicializar la aplicación SPA
  */
@@ -18,9 +73,9 @@ function initApp() {
 	}
 
 	// Asegurar que el router esté inicializado
-	if (window.router) {
-		if (!window.router.initialized) {
-			window.router.init();
+	if (globalThis.router) {
+		if (!globalThis.router.initialized) {
+			globalThis.router.init();
 		}
 		setupRoutes();
 	} else {
@@ -32,7 +87,7 @@ function initApp() {
  * Configurar rutas
  */
 function setupRoutes() {
-	const router = window.router;
+	const router = globalThis.router;
 
 	// Ruta home - redirige a noticias
 	router.route('/', () => {
@@ -86,7 +141,7 @@ function setupRoutes() {
 
 	// No manejar la ruta inicial aquí, se manejará después de registrar todas las rutas
 	setTimeout(() => {
-		const currentPath = window.location.pathname;
+		const currentPath = globalThis.location.pathname;
 		if (currentPath === '/') {
 			router.navigate('/noticias');
 		} else {
@@ -149,7 +204,7 @@ let newsViewModel = null;
 
 async function initNoticiasView() {
 	// Inicializar MVVM: Model y ViewModel
-	if (!window.NewsModel || !window.NewsViewModel) {
+	if (!globalThis.NewsModel || !globalThis.NewsViewModel) {
 		console.error('[MVVM] NewsModel o NewsViewModel no están disponibles');
 		return;
 	}
@@ -161,8 +216,8 @@ async function initNoticiasView() {
 	}
 
 	// Crear nuevo ViewModel solo si no existe
-	const newsModel = new window.NewsModel();
-	newsViewModel = new window.NewsViewModel(newsModel);
+	const newsModel = new globalThis.NewsModel();
+	newsViewModel = new globalThis.NewsViewModel(newsModel);
 
 	// Configurar callbacks del ViewModel para actualizar la View
 	newsViewModel.onNewsChanged((news) => {
@@ -190,39 +245,39 @@ async function initNoticiasView() {
 	});
 
 	// Inicializar Observer Pattern para sincronización de UI (solo una vez)
-	if (window.NewsObserver && window.NewsObserver.getNewsEventSubject && !window._observersInitialized) {
-		const newsSubject = window.NewsObserver.getNewsEventSubject();
+	if (globalThis.NewsObserver && globalThis.NewsObserver.getNewsEventSubject && !globalThis._observersInitialized) {
+		const newsSubject = globalThis.NewsObserver.getNewsEventSubject();
 		
 		// Observer para recargar la lista cuando cambian las noticias
-		const newsListObserver = new window.NewsObserver.NewsListObserver(() => {
+		const newsListObserver = new globalThis.NewsObserver.NewsListObserver(() => {
 			if (newsViewModel) {
 				newsViewModel.loadNews();
 			}
 		});
 		
 		// Observer para mostrar notificaciones
-		const notificationObserver = new window.NewsObserver.NotificationObserver();
+		const notificationObserver = new globalThis.NewsObserver.NotificationObserver();
 		
 		// Observer para sincronización entre pestañas (solo uno global)
-		if (!window._tabSyncObserver) {
-			window._tabSyncObserver = new window.NewsObserver.TabSyncObserver();
+		if (!globalThis._tabSyncObserver) {
+			globalThis._tabSyncObserver = new globalThis.NewsObserver.TabSyncObserver();
 		}
 		
 		// Registrar observadores (solo si no están ya registrados)
-		if (!window._newsListObserverAttached) {
+		if (!globalThis._newsListObserverAttached) {
 			newsSubject.attach(newsListObserver);
-			window._newsListObserverAttached = true;
+			globalThis._newsListObserverAttached = true;
 		}
-		if (!window._notificationObserverAttached) {
+		if (!globalThis._notificationObserverAttached) {
 			newsSubject.attach(notificationObserver);
-			window._notificationObserverAttached = true;
+			globalThis._notificationObserverAttached = true;
 		}
-		if (!window._tabSyncObserverAttached) {
-			newsSubject.attach(window._tabSyncObserver);
-			window._tabSyncObserverAttached = true;
+		if (!globalThis._tabSyncObserverAttached) {
+			newsSubject.attach(globalThis._tabSyncObserver);
+			globalThis._tabSyncObserverAttached = true;
 		}
 		
-		window._observersInitialized = true;
+		globalThis._observersInitialized = true;
 	}
 	
 	// Cargar categorías usando el ViewModel
@@ -276,7 +331,7 @@ async function initNoticiasView() {
  */
 async function initPusher() {
 	// Evitar múltiples inicializaciones
-	if (window._pusherInitialized) {
+	if (globalThis._pusherInitialized) {
 		return;
 	}
 	
@@ -292,12 +347,12 @@ async function initPusher() {
 		
 		const config = await response.json();
 		
-		if (!config.enabled || !window.Pusher) {
+		if (!config.enabled || !globalThis.Pusher) {
 			return;
 		}
 		
 		// Inicializar Pusher
-		const pusher = new window.Pusher(config.key, {
+		const pusher = new globalThis.Pusher(config.key, {
 			cluster: config.cluster,
 			encrypted: true
 		});
@@ -326,7 +381,7 @@ async function initPusher() {
 			}
 		});
 		
-		window._pusherInitialized = true;
+		globalThis._pusherInitialized = true;
 	} catch (error) {
 		console.error('[PUSHER] Error al inicializar Pusher:', error);
 	}
@@ -379,7 +434,7 @@ function renderCategories(categories) {
 	container.querySelectorAll('.category-filter').forEach(btn => {
 		btn.addEventListener('click', (e) => {
 			const catId = e.target.dataset.category;
-			const categoryId = catId === 'null' ? null : parseInt(catId);
+			const categoryId = catId === 'null' ? null : Number.parseInt(catId, 10);
 			if (newsViewModel) {
 				newsViewModel.setSelectedCategory(categoryId);
 			}
@@ -439,9 +494,9 @@ function renderNews(news) {
 	container.querySelectorAll('.news-card').forEach(card => {
 		card.addEventListener('click', (e) => {
 			if (e.target.closest('button') || e.target.closest('.dropdown')) return;
-			const newsId = card.getAttribute('data-news-id');
-			if (window.router) {
-				window.router.navigate(`/noticia/${newsId}`);
+			const newsId = card.dataset.newsId;
+			if (globalThis.router) {
+				globalThis.router.navigate(`/noticia/${newsId}`);
 			}
 		});
 	});
@@ -526,7 +581,7 @@ async function loadNoticiaView(newsId) {
 				<h1 class="text-3xl font-bold text-gray-900 dark:text-white mb-4">Noticia no encontrada</h1>
 				<p class="text-gray-600 dark:text-gray-400 mb-6">${error.message}</p>
 				<button 
-					onclick="window.router.navigate('/noticias')"
+					onclick="globalThis.router.navigate('/noticias')"
 					class="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors"
 				>
 					Volver a noticias
@@ -546,7 +601,7 @@ function renderNoticiaView(noticia) {
 	if (noticia.fecha) {
 		try {
 			const date = new Date(noticia.fecha);
-			if (!isNaN(date.getTime())) {
+			if (!Number.isNaN(date.getTime())) {
 				fecha = date.toLocaleDateString('es-ES', {
 					year: 'numeric',
 					month: 'long',
@@ -568,28 +623,12 @@ function renderNoticiaView(noticia) {
 		`).join('')
 		: '';
 
-	function generarSlug(texto) {
-		if (!texto) return '';
-		return texto
-			.toString()
-			.toLowerCase()
-			.trim()
-			.replace(/\s+/g, '-')
-			.normalize('NFD')
-			.replace(/[\u0300-\u036f]/g, '')
-			.replace(/[^a-z0-9-]/g, '')
-			.replace(/-+/g, '-')
-			.replace(/^-+|-+$/g, '')
-			.substring(0, 100)
-			.replace(/-+$/, '');
-	}
-
 	const slug = generarSlug(noticia.titulo);
 
 	appContainer.innerHTML = `
 		<article class="mb-12">
 			<button 
-				onclick="window.router.navigate('/noticias')"
+				onclick="globalThis.router.navigate('/noticias')"
 				class="inline-flex items-center gap-2 text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 mb-4 transition-colors"
 			>
 				<i class="bi bi-arrow-left"></i>
@@ -737,7 +776,7 @@ function renderNoticiaView(noticia) {
 					id="disqus_thread" 
 					data-disqus-identifier="noticia-${noticia.id}"
 					data-disqus-title="${escapeHTML(noticia.titulo)}"
-					data-disqus-url="${window.location.origin}/noticia/${noticia.id}/${slug}"
+					data-disqus-url="${globalThis.location.origin}/noticia/${noticia.id}/${slug}"
 					class="disqus-container"
 				></div>
 				<noscript>
@@ -826,28 +865,8 @@ function initNoticiaView(noticia) {
 	let modoEdicion = false;
 
 	// Obtener información del usuario
-	async function obtenerUsuarioActual() {
-		try {
-			const res = await fetch('/api/auth/me', {
-				credentials: 'include'
-			});
-			if (res.ok) {
-				const data = await res.json();
-				if (data.authenticated) {
-					return {
-						usuario: data.usuario,
-						rol: data.rol || 'usuario'
-					};
-				}
-			}
-			return null;
-		} catch (e) {
-			return null;
-		}
-	}
-
 	async function puedeEditar() {
-		const userInfo = await obtenerUsuarioActual();
+		const userInfo = await obtenerUsuarioActualDesdeApi();
 		if (!userInfo) return false;
 		const role = userInfo.rol;
 		const currentUser = userInfo.usuario;
@@ -857,7 +876,7 @@ function initNoticiaView(noticia) {
 	}
 
 	async function puedeEliminar() {
-		const userInfo = await obtenerUsuarioActual();
+		const userInfo = await obtenerUsuarioActualDesdeApi();
 		if (!userInfo) return false;
 		const role = userInfo.rol;
 		return role === 'admin' || role === 'superadmin';
@@ -1032,7 +1051,7 @@ function initNoticiaView(noticia) {
 		}
 
 		const categoriasSeleccionadas = Array.from(document.querySelectorAll('.categoria-checkbox-edit:checked'))
-			.map(cb => parseInt(cb.value));
+			.map(cb => Number.parseInt(cb.value, 10));
 
 		try {
 			const response = await fetch(`/api/news/${noticiaData.id}`, {
@@ -1056,8 +1075,8 @@ function initNoticiaView(noticia) {
 			noticiaData = noticiaActualizada;
 
 			// Notificar al observer sobre la actualización (patrón Observer)
-			if (window.NewsObserver && window.NewsObserver.getNewsEventSubject) {
-				const newsSubject = window.NewsObserver.getNewsEventSubject();
+			if (globalThis.NewsObserver && globalThis.NewsObserver.getNewsEventSubject) {
+				const newsSubject = globalThis.NewsObserver.getNewsEventSubject();
 				newsSubject.newsUpdated(noticiaActualizada);
 			}
 
@@ -1123,8 +1142,8 @@ function initNoticiaView(noticia) {
 			}
 
 			// Notificar al observer sobre la eliminación (patrón Observer)
-			if (window.NewsObserver && window.NewsObserver.getNewsEventSubject) {
-				const newsSubject = window.NewsObserver.getNewsEventSubject();
+			if (globalThis.NewsObserver && globalThis.NewsObserver.getNewsEventSubject) {
+				const newsSubject = globalThis.NewsObserver.getNewsEventSubject();
 				newsSubject.newsDeleted(noticiaData.id);
 			}
 
@@ -1133,8 +1152,8 @@ function initNoticiaView(noticia) {
 			
 			// Redirigir después de cerrar el modal
 			setTimeout(() => {
-				if (window.router) {
-					window.router.navigate('/noticias');
+				if (globalThis.router) {
+					globalThis.router.navigate('/noticias');
 				}
 			}, 1500);
 		} catch (error) {
@@ -1238,26 +1257,11 @@ function initNoticiaView(noticia) {
 	const DISQUS_SHORTNAME = 'noticiasul';
 	const noticiaId = noticia.id;
 	const pageTitle = noticia.titulo;
-	function generarSlug(texto) {
-		if (!texto) return '';
-		return texto
-			.toString()
-			.toLowerCase()
-			.trim()
-			.replace(/\s+/g, '-')
-			.normalize('NFD')
-			.replace(/[\u0300-\u036f]/g, '')
-			.replace(/[^a-z0-9-]/g, '')
-			.replace(/-+/g, '-')
-			.replace(/^-+|-+$/g, '')
-			.substring(0, 100)
-			.replace(/-+$/, '');
-	}
 	const slug = generarSlug(noticia.titulo);
-	const pageUrl = `${window.location.origin}/noticia/${noticia.id}/${slug}`;
+	const pageUrl = `${globalThis.location.origin}/noticia/${noticia.id}/${slug}`;
 
 	if (DISQUS_SHORTNAME && noticiaId) {
-		window.disqus_config = function() {
+		globalThis.disqus_config = function() {
 			this.page.identifier = `noticia-${noticiaId}`;
 			this.page.url = pageUrl;
 			this.page.title = pageTitle || 'Noticia';
@@ -1268,7 +1272,7 @@ function initNoticiaView(noticia) {
 			const s = d.createElement('script');
 			s.id = 'disqus-script';
 			s.src = `https://${DISQUS_SHORTNAME}.disqus.com/embed.js`;
-			s.setAttribute('data-timestamp', +new Date());
+			s.dataset.timestamp = String(Date.now());
 			s.async = true;
 			(d.head || d.body).appendChild(s);
 		})();
@@ -1637,7 +1641,7 @@ function initAdminView() {
 	}
 
 	// Funciones globales para editar/eliminar
-	window.editarUsuario = function(id, usuario, rol) {
+	globalThis.editarUsuario = function(id, usuario, rol) {
 		console.log(`[ADMIN] Editando usuario - ID: ${id}, Usuario: ${usuario}, Rol: ${rol}`);
 		
 		const modal = document.getElementById('modal-editar-usuario');
@@ -1668,7 +1672,7 @@ function initAdminView() {
 		console.log('[ADMIN] Modal de edición abierto correctamente');
 	};
 
-	window.eliminarUsuario = function(id, usuario) {
+	globalThis.eliminarUsuario = function(id, usuario) {
 		mostrarModalEliminarUsuario(id, usuario);
 	};
 
@@ -1697,7 +1701,6 @@ function initAdminView() {
 		if (usuarioIdInput) usuarioIdInput.value = '';
 		
 		if (usuarioPasswordInput) {
-			usuarioPasswordInput.setAttribute('required', 'required');
 			usuarioPasswordInput.required = true;
 			usuarioPasswordInput.disabled = false;
 			usuarioPasswordInput.value = '';
@@ -1706,7 +1709,6 @@ function initAdminView() {
 		if (usuarioNombreInput) {
 			usuarioNombreInput.readOnly = false;
 			usuarioNombreInput.removeAttribute('readonly');
-			usuarioNombreInput.setAttribute('required', 'required');
 			usuarioNombreInput.required = true;
 			usuarioNombreInput.value = '';
 		}
@@ -1770,28 +1772,8 @@ function initAdminView() {
 			return;
 		}
 
-		function getRoleBadgeClass(rol) {
-			const classes = {
-				'superadmin': 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200',
-				'admin': 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200',
-				'maestro': 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200',
-				'usuario': 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200'
-			};
-			return classes[rol] || classes.usuario;
-		}
-
-		function getRoleLabel(rol) {
-			const labels = {
-				'superadmin': 'Super Admin',
-				'admin': 'Admin',
-				'maestro': 'Maestro',
-				'usuario': 'Usuario'
-			};
-			return labels[rol] || rol;
-		}
-
 		tbody.innerHTML = usuarios.map(usuario => {
-			const usuarioEscapado = escapeHTML(usuario.usuario).replace(/'/g, "\\'").replace(/"/g, '&quot;');
+			const usuarioEscapado = escapeHTML(usuario.usuario).replaceAll("'", "\\'").replaceAll('"', '&quot;');
 			return `
 			<tr class="hover:bg-gray-50 dark:hover:bg-gray-700">
 				<td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">
@@ -2171,29 +2153,14 @@ async function loadAgregarView() {
  * Inicializar vista de agregar
  */
 function initAgregarView() {
-	async function getCurrentUser() {
-		try {
-			const res = await fetch('/api/auth/me', {
-				credentials: 'include'
-			});
-			if (res.ok) {
-				const data = await res.json();
-				return data.authenticated ? data.usuario : null;
-			}
-			return null;
-		} catch (e) {
-			return null;
-		}
-	}
-
 	// Llenar autor
-	getCurrentUser().then(usuario => {
+	obtenerNombreUsuarioSesion().then(usuario => {
 		const autorInput = document.getElementById('autor');
 		if (autorInput && usuario) {
 			autorInput.value = usuario;
 		} else if (!usuario) {
-			if (window.router) {
-				window.router.navigate('/login');
+			if (globalThis.router) {
+				globalThis.router.navigate('/login');
 			}
 		}
 	});
@@ -2269,7 +2236,7 @@ function initAgregarView() {
 			e.preventDefault();
 			
 			// Verificar que el ViewModel esté disponible
-			if (!window.NewsModel || !window.NewsViewModel) {
+			if (!globalThis.NewsModel || !globalThis.NewsViewModel) {
 				mostrarModalMensajeAgregar('Error', 'Sistema MVVM no disponible', 'error');
 				return;
 			}
@@ -2288,15 +2255,15 @@ function initAgregarView() {
 
 			try {
 				// Crear instancia del ViewModel si no existe
-				let agregarViewModel = window.agregarNewsViewModel;
+				let agregarViewModel = globalThis.agregarNewsViewModel;
 				if (!agregarViewModel) {
-					const newsModel = new window.NewsModel();
-					agregarViewModel = new window.NewsViewModel(newsModel);
-					window.agregarNewsViewModel = agregarViewModel;
+					const newsModel = new globalThis.NewsModel();
+					agregarViewModel = new globalThis.NewsViewModel(newsModel);
+					globalThis.agregarNewsViewModel = agregarViewModel;
 				}
 
 				const categoriasSeleccionadas = Array.from(document.querySelectorAll('.categoria-checkbox:checked'))
-					.map(cb => parseInt(cb.value));
+					.map(cb => Number.parseInt(cb.value, 10));
 
 				const datosNoticia = {
 					titulo,
@@ -2310,8 +2277,8 @@ function initAgregarView() {
 				const nuevaNoticia = await agregarViewModel.createNews(datosNoticia);
 				
 				// Notificar al observer sobre la creación (patrón Observer)
-				if (window.NewsObserver && window.NewsObserver.getNewsEventSubject) {
-					const newsSubject = window.NewsObserver.getNewsEventSubject();
+				if (globalThis.NewsObserver && globalThis.NewsObserver.getNewsEventSubject) {
+					const newsSubject = globalThis.NewsObserver.getNewsEventSubject();
 					newsSubject.newsCreated(nuevaNoticia);
 				}
 				
@@ -2322,8 +2289,8 @@ function initAgregarView() {
 				document.querySelectorAll('.categoria-checkbox').forEach(cb => cb.checked = false);
 
 				setTimeout(() => {
-					if (window.router) {
-						window.router.navigate('/noticias');
+					if (globalThis.router) {
+						globalThis.router.navigate('/noticias');
 					}
 				}, 1500);
 			} catch (error) {
@@ -2432,7 +2399,119 @@ async function loadDebugView() {
  */
 function loadPatronesView() {
 	// Redirigir a la página completa de patrones (página Astro estática)
-	window.location.href = '/patrones';
+	globalThis.location.href = '/patrones';
+}
+
+function formatDebugSampleCellHtml(val) {
+	if (val === null) {
+		return '<span class="text-gray-400">NULL</span>';
+	}
+	if (typeof val === 'object') {
+		return escapeHTML(JSON.stringify(val));
+	}
+	const str = String(val);
+	if (str.length > 50) {
+		return escapeHTML(str.substring(0, 50)) + '...';
+	}
+	return escapeHTML(str);
+}
+
+function formatDebugColumnDefaultHtml(col) {
+	if (col.Default !== null) {
+		return escapeHTML(String(col.Default || col.default || 'NULL'));
+	}
+	return 'NULL';
+}
+
+function buildDebugTableSampleSection(table) {
+	if (!table.sample_data || table.sample_data.length === 0) {
+		return `
+								<div class="text-gray-500 dark:text-gray-400 italic">
+									No hay datos de ejemplo (tabla vacía)
+								</div>`;
+	}
+	const keys = Object.keys(table.sample_data[0]);
+	const headerRow = keys.map(key => `
+														<th class="px-4 py-2 text-left text-gray-700 dark:text-gray-300 border-r border-gray-200 dark:border-gray-600">${escapeHTML(key)}</th>
+													`).join('');
+	const bodyRows = table.sample_data.map(row => {
+		const cells = Object.values(row).map(val => `
+														<td class="px-4 py-2 text-gray-600 dark:text-gray-400 border-r border-gray-200 dark:border-gray-600">${formatDebugSampleCellHtml(val)}</td>
+													`).join('');
+		return `
+													<tr class="hover:bg-gray-50 dark:hover:bg-gray-700">${cells}
+													</tr>`;
+	}).join('');
+	const footer = table.total_records > 5 ? `
+										<p class="text-sm text-gray-500 dark:text-gray-400 mt-2">
+											Mostrando 5 de ${table.total_records} registros
+										</p>
+									` : '';
+	return `
+								<div>
+									<h4 class="text-lg font-semibold text-gray-900 dark:text-white mb-3">Datos de Ejemplo (${table.sample_data.length} registros)</h4>
+									<div class="overflow-x-auto">
+										<table class="w-full text-sm border border-gray-200 dark:border-gray-600">
+											<thead class="bg-gray-100 dark:bg-gray-700">
+												<tr>
+													${headerRow}
+												</tr>
+											</thead>
+											<tbody class="divide-y divide-gray-200 dark:divide-gray-600">
+												${bodyRows}
+											</tbody>
+										</table>
+									</div>${footer}
+								</div>`;
+}
+
+function buildDebugTableCardHtml(table) {
+	const columnsRows = table.columns.map(col => `
+											<tr class="hover:bg-gray-50 dark:hover:bg-gray-700">
+													<td class="px-4 py-2 font-mono text-gray-900 dark:text-white">${escapeHTML(col.Field || col.field || '')}</td>
+													<td class="px-4 py-2 text-gray-600 dark:text-gray-400">${escapeHTML(col.Type || col.type || '')}</td>
+													<td class="px-4 py-2 text-gray-600 dark:text-gray-400">${escapeHTML(col.Null || col.null || 'NO')}</td>
+													<td class="px-4 py-2 text-gray-600 dark:text-gray-400">${escapeHTML(col.Key || col.key || '-')}</td>
+													<td class="px-4 py-2 text-gray-600 dark:text-gray-400">${formatDebugColumnDefaultHtml(col)}</td>
+												</tr>
+											`).join('');
+	return `
+					<div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+						<div class="bg-gray-50 dark:bg-gray-700 px-6 py-4 border-b border-gray-200 dark:border-gray-600">
+							<h3 class="text-xl font-bold text-gray-900 dark:text-white">
+								📊 ${escapeHTML(table.name)}
+							</h3>
+							<p class="text-sm text-gray-600 dark:text-gray-400 mt-1">${escapeHTML(table.description || '')}</p>
+							<p class="text-sm text-blue-600 dark:text-blue-400 mt-2">
+								<strong>Total de registros:</strong> ${table.total_records}
+							</p>
+						</div>
+						
+						<div class="p-6">
+							<div class="mb-6">
+								<h4 class="text-lg font-semibold text-gray-900 dark:text-white mb-3">Estructura de Columnas</h4>
+								<div class="overflow-x-auto">
+									<table class="w-full text-sm">
+										<thead class="bg-gray-100 dark:bg-gray-700">
+											<tr>
+												<th class="px-4 py-2 text-left text-gray-700 dark:text-gray-300">Campo</th>
+												<th class="px-4 py-2 text-left text-gray-700 dark:text-gray-300">Tipo</th>
+												<th class="px-4 py-2 text-left text-gray-700 dark:text-gray-300">Null</th>
+												<th class="px-4 py-2 text-left text-gray-700 dark:text-gray-300">Key</th>
+												<th class="px-4 py-2 text-left text-gray-700 dark:text-gray-300">Default</th>
+											</tr>
+										</thead>
+										<tbody class="divide-y divide-gray-200 dark:divide-gray-600">
+											${columnsRows}
+										</tbody>
+									</table>
+								</div>
+							</div>
+							
+							${buildDebugTableSampleSection(table)}
+						</div>
+					</div>
+				`;
 }
 
 /**
@@ -2469,92 +2548,7 @@ function initDebugView() {
 				return;
 			}
 			
-			let html = '';
-			
-			data.tables.forEach(table => {
-				html += `
-					<div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
-						<div class="bg-gray-50 dark:bg-gray-700 px-6 py-4 border-b border-gray-200 dark:border-gray-600">
-							<h3 class="text-xl font-bold text-gray-900 dark:text-white">
-								📊 ${escapeHTML(table.name)}
-							</h3>
-							<p class="text-sm text-gray-600 dark:text-gray-400 mt-1">${escapeHTML(table.description || '')}</p>
-							<p class="text-sm text-blue-600 dark:text-blue-400 mt-2">
-								<strong>Total de registros:</strong> ${table.total_records}
-							</p>
-						</div>
-						
-						<div class="p-6">
-							<div class="mb-6">
-								<h4 class="text-lg font-semibold text-gray-900 dark:text-white mb-3">Estructura de Columnas</h4>
-								<div class="overflow-x-auto">
-									<table class="w-full text-sm">
-										<thead class="bg-gray-100 dark:bg-gray-700">
-											<tr>
-												<th class="px-4 py-2 text-left text-gray-700 dark:text-gray-300">Campo</th>
-												<th class="px-4 py-2 text-left text-gray-700 dark:text-gray-300">Tipo</th>
-												<th class="px-4 py-2 text-left text-gray-700 dark:text-gray-300">Null</th>
-												<th class="px-4 py-2 text-left text-gray-700 dark:text-gray-300">Key</th>
-												<th class="px-4 py-2 text-left text-gray-700 dark:text-gray-300">Default</th>
-											</tr>
-										</thead>
-										<tbody class="divide-y divide-gray-200 dark:divide-gray-600">
-											${table.columns.map(col => `
-												<tr class="hover:bg-gray-50 dark:hover:bg-gray-700">
-													<td class="px-4 py-2 font-mono text-gray-900 dark:text-white">${escapeHTML(col.Field || col.field || '')}</td>
-													<td class="px-4 py-2 text-gray-600 dark:text-gray-400">${escapeHTML(col.Type || col.type || '')}</td>
-													<td class="px-4 py-2 text-gray-600 dark:text-gray-400">${escapeHTML(col.Null || col.null || 'NO')}</td>
-													<td class="px-4 py-2 text-gray-600 dark:text-gray-400">${escapeHTML(col.Key || col.key || '-')}</td>
-													<td class="px-4 py-2 text-gray-600 dark:text-gray-400">${col.Default !== null ? escapeHTML(String(col.Default || col.default || 'NULL')) : 'NULL'}</td>
-												</tr>
-											`).join('')}
-										</tbody>
-									</table>
-								</div>
-							</div>
-							
-							${table.sample_data && table.sample_data.length > 0 ? `
-								<div>
-									<h4 class="text-lg font-semibold text-gray-900 dark:text-white mb-3">Datos de Ejemplo (${table.sample_data.length} registros)</h4>
-									<div class="overflow-x-auto">
-										<table class="w-full text-sm border border-gray-200 dark:border-gray-600">
-											<thead class="bg-gray-100 dark:bg-gray-700">
-												<tr>
-													${Object.keys(table.sample_data[0]).map(key => `
-														<th class="px-4 py-2 text-left text-gray-700 dark:text-gray-300 border-r border-gray-200 dark:border-gray-600">${escapeHTML(key)}</th>
-													`).join('')}
-												</tr>
-											</thead>
-											<tbody class="divide-y divide-gray-200 dark:divide-gray-600">
-												${table.sample_data.map(row => `
-													<tr class="hover:bg-gray-50 dark:hover:bg-gray-700">
-														${Object.values(row).map(val => {
-															const value = val === null ? '<span class="text-gray-400">NULL</span>' : 
-																typeof val === 'object' ? escapeHTML(JSON.stringify(val)) : 
-																String(val).length > 50 ? escapeHTML(String(val).substring(0, 50)) + '...' : 
-																escapeHTML(String(val));
-															return `<td class="px-4 py-2 text-gray-600 dark:text-gray-400 border-r border-gray-200 dark:border-gray-600">${value}</td>`;
-														}).join('')}
-													</tr>
-												`).join('')}
-											</tbody>
-										</table>
-									</div>
-									${table.total_records > 5 ? `
-										<p class="text-sm text-gray-500 dark:text-gray-400 mt-2">
-											Mostrando 5 de ${table.total_records} registros
-										</p>
-									` : ''}
-								</div>
-							` : `
-								<div class="text-gray-500 dark:text-gray-400 italic">
-									No hay datos de ejemplo (tabla vacía)
-								</div>
-							`}
-						</div>
-					</div>
-				`;
-			});
+			const html = data.tables.map(table => buildDebugTableCardHtml(table)).join('');
 			
 			if (container) container.innerHTML = html;
 			
@@ -2662,16 +2656,16 @@ async function loadLoginView() {
 
 				if (response.ok && data.mensaje) {
 					// Verificar autenticación y actualizar UI del usuario
-					if (window.verificarAutenticacion && window.actualizarUI) {
+					if (globalThis.verificarAutenticacion && globalThis.actualizarUI) {
 						// Esperar un momento para que la cookie se establezca (más tiempo para Cloudflare)
 						// Intentar múltiples veces si es necesario
 						let intentos = 0;
 						const maxIntentos = 5;
 						const verificarYActualizar = async () => {
 							intentos++;
-							const userData = await window.verificarAutenticacion();
+							const userData = await globalThis.verificarAutenticacion();
 							if (userData.authenticated) {
-								window.actualizarUI(userData);
+								globalThis.actualizarUI(userData);
 							} else if (intentos < maxIntentos) {
 								// Si no está autenticado, esperar un poco más e intentar de nuevo
 								setTimeout(verificarYActualizar, 200);
@@ -2681,8 +2675,8 @@ async function loadLoginView() {
 						setTimeout(verificarYActualizar, 300);
 					}
 					// Redirigir a noticias
-					if (window.router) {
-						window.router.navigate('/noticias');
+					if (globalThis.router) {
+						globalThis.router.navigate('/noticias');
 					}
 				} else {
 					errorDiv.textContent = data.error || 'Credenciales incorrectas';
@@ -2829,8 +2823,8 @@ function initRegistroView() {
 				formulario.reset();
 				
 				setTimeout(() => {
-					if (window.router) {
-						window.router.navigate('/login');
+					if (globalThis.router) {
+						globalThis.router.navigate('/login');
 					}
 				}, 2000);
 			} catch (error) {
@@ -2859,7 +2853,7 @@ if (document.readyState === 'loading') {
 }
 
 // Exportar funciones para uso global
-window.app = {
+globalThis.app = {
 	loadNoticiasView,
 	loadNoticiaView,
 	loadAdminView,

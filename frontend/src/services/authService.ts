@@ -128,12 +128,12 @@ export async function logout(): Promise<void> {
 			method: 'POST',
 			credentials: 'include'
 		});
-	} catch (e) {
-		// Silenciar errores de logout
+	} catch (e: unknown) {
+		console.debug('[AUTH] Logout no completado (red o sesión ya cerrada):', e instanceof Error ? e.name : typeof e);
 	}
 }
 
-// NO hay caché local - TODO se obtiene del servidor en cada petición
+// Sin caché local: toda la información se obtiene del servidor en cada petición
 
 export async function getCurrentUserInfo(): Promise<{ usuario: string; nombre: string; rol: string } | null> {
 	try {
@@ -240,7 +240,7 @@ export async function getAuthHeaders(): Promise<Record<string, string>> {
 	
 	// El token se envía automáticamente en la cookie HTTP-only
 	// No necesitamos agregar headers manualmente
-	// Todo se verifica en el servidor desde la cookie
+	// La verificación ocurre en el servidor a partir de la cookie
 	
 	return headers;
 }

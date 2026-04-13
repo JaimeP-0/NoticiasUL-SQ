@@ -19,7 +19,7 @@ from app_constants import (
     TRYCLOUDFLARE_DOMAIN,
     TRYCLOUDFLARE_HOST_SUFFIX,
     HTTPS_PREFIX,
-    MSG_USER_PASSWORD_REQUIRED,
+    MSG_LOGIN_FIELDS_REQUIRED,
     MSG_JSON_DB_ONLY,
     DATABASE_JSON_BASENAME,
     DEFAULT_NEWS_TITLE,
@@ -433,7 +433,7 @@ def register():
         email = data.get("email", "")
         
         if not usuario or not password:
-            return jsonify({"error": MSG_USER_PASSWORD_REQUIRED}), 400
+            return jsonify({"error": MSG_LOGIN_FIELDS_REQUIRED}), 400
         
         existing_user = db.execute_query(
             "SELECT idUsuario FROM usuarios_nul WHERE usuario = %s",
@@ -529,7 +529,7 @@ def create_user():
         logger.info("Superadmin creando usuario (operación administrativa)")
         
         if not usuario or not password:
-            return jsonify({"error": MSG_USER_PASSWORD_REQUIRED}), 400
+            return jsonify({"error": MSG_LOGIN_FIELDS_REQUIRED}), 400
         
         # Verificar si el usuario ya existe
         existing_user = db.execute_query(
@@ -720,7 +720,7 @@ def login():
         if not usuario or not password:
             logger.warning("[LOGIN] Credenciales incompletas")
             return _login_add_cloudflare_cors_headers(
-                jsonify({"error": MSG_USER_PASSWORD_REQUIRED})
+                jsonify({"error": MSG_LOGIN_FIELDS_REQUIRED})
             ), 400
 
         try:
@@ -1290,9 +1290,7 @@ def test_cookie():
 def get_current_user():
     """Obtener información del usuario actual desde el token en la cookie"""
     try:
-        logger.info("[AUTH/ME] Endpoint llamado")
-        logger.info(f"[AUTH/ME] Origen: {request.headers.get('Origin', 'N/A')}")
-        logger.info(f"[AUTH/ME] Cookies recibidas: {list(request.cookies.keys())}")
+        logger.info("[AUTH/ME] Solicitud de estado de sesión")
         
         # Intentar obtener el token
         token = get_token_from_request()
@@ -1321,7 +1319,7 @@ def get_current_user():
                 response.headers['Access-Control-Allow-Credentials'] = 'true'
             return response, 401
         
-        logger.info(f"[AUTH/ME] Usuario autenticado: {user_data.get('usuario')}, Rol: {user_data.get('rol')}")
+        logger.info("[AUTH/ME] Sesión válida")
         
         return jsonify({
             "authenticated": True,
@@ -1330,13 +1328,11 @@ def get_current_user():
             "rol": user_data.get('rol'),
             "user_id": user_data.get('user_id')
         }), 200
-    except Exception as e:
-        logger.error(f"[AUTH/ME] Error general al obtener usuario actual: {e}")
-        import traceback
-        logger.error(traceback.format_exc())
+    except Exception:
+        logger.exception("[AUTH/ME] Error al resolver sesión")
         return jsonify({
             "authenticated": False,
-            "error": f"Error interno: {str(e)}"
+            "error": "Error interno al verificar la sesión"
         }), 500
 
 @app.route('/api/actions', methods=['GET'])

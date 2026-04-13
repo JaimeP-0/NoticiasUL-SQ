@@ -19,8 +19,8 @@ class Router {
 		this.initialized = true;
 
 		// Escuchar cambios en el historial del navegador
-		window.addEventListener('popstate', (e) => {
-			this.handleRoute(window.location.pathname);
+		globalThis.addEventListener('popstate', (e) => {
+			this.handleRoute(globalThis.location.pathname);
 		});
 
 		// Manejar clics en links (usar delegación de eventos)
@@ -53,7 +53,7 @@ class Router {
 		}
 
 		// Actualizar la URL sin recargar la página
-		window.history.pushState({}, '', path);
+		globalThis.history.pushState({}, '', path);
 		this.handleRoute(path);
 
 		if (this.afterRouteChange) {
@@ -164,21 +164,21 @@ class Router {
 	 * @returns {string} - Hash de la URL
 	 */
 	getHash() {
-		return window.location.hash.slice(1);
+		return globalThis.location.hash.slice(1);
 	}
 }
 
 // Instancia global del router
-if (typeof window !== 'undefined') {
-	window.router = new Router();
+if (typeof globalThis.window !== 'undefined') {
+	globalThis.router = new Router();
 	
 	// Inicializar cuando el DOM esté listo
 	if (document.readyState === 'loading') {
 		document.addEventListener('DOMContentLoaded', () => {
-			window.router.init();
+			globalThis.router.init();
 		});
 	} else {
-		window.router.init();
+		globalThis.router.init();
 	}
 }
 
