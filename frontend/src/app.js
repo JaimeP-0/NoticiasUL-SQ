@@ -58,6 +58,138 @@ function getRoleLabel(rol) {
 	return labels[rol] || rol;
 }
 
+/** IDs de un modal de mensaje (noticia | admin | agregar). */
+function modalMensajeIds(sufijo) {
+	return {
+		modalId: `modal-mensaje-${sufijo}`,
+		tituloId: `modal-titulo-mensaje-${sufijo}`,
+		contenidoId: `modal-contenido-mensaje-${sufijo}`,
+		iconoWrapId: `modal-icono-${sufijo}`,
+		iconoClaseId: `modal-icono-clase-${sufijo}`,
+		btnCerrarId: `btn-cerrar-mensaje-${sufijo}`,
+	};
+}
+
+/** Markup único para modales de alerta (evita ~75 líneas ×3 duplicadas). */
+function modalMensajeCardHtml(sufijo) {
+	return `
+		<div id="modal-mensaje-${sufijo}" class="fixed inset-0 bg-black bg-opacity-50 dark:bg-opacity-70 z-50 hidden flex items-center justify-center">
+			<div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4 transform transition-all">
+				<div class="p-6">
+					<div class="flex items-center gap-3 mb-4">
+						<div id="modal-icono-${sufijo}" class="flex-shrink-0 w-12 h-12 rounded-full flex items-center justify-center">
+							<i id="modal-icono-clase-${sufijo}" class="text-2xl"></i>
+						</div>
+						<h3 id="modal-titulo-mensaje-${sufijo}" class="text-xl font-bold text-gray-900 dark:text-white">
+						</h3>
+					</div>
+					<p id="modal-contenido-mensaje-${sufijo}" class="text-gray-600 dark:text-gray-300 mb-6">
+					</p>
+					<div class="flex gap-3 justify-end">
+						<button
+							id="btn-cerrar-mensaje-${sufijo}"
+							class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors"
+						>
+							Aceptar
+						</button>
+					</div>
+				</div>
+			</div>
+		</div>`;
+}
+
+function getModalMensajeTipoStyles(tipo) {
+	switch (tipo) {
+		case 'error':
+			return {
+				bgColor: 'bg-red-100 dark:bg-red-900/30',
+				icono: 'bi-exclamation-circle-fill',
+				iconoColor: 'text-red-600 dark:text-red-400',
+			};
+		case 'success':
+			return {
+				bgColor: 'bg-green-100 dark:bg-green-900/30',
+				icono: 'bi-check-circle-fill',
+				iconoColor: 'text-green-600 dark:text-green-400',
+			};
+		case 'warning':
+			return {
+				bgColor: 'bg-yellow-100 dark:bg-yellow-900/30',
+				icono: 'bi-exclamation-triangle-fill',
+				iconoColor: 'text-yellow-600 dark:text-yellow-400',
+			};
+		default:
+			return {
+				bgColor: 'bg-blue-100 dark:bg-blue-900/30',
+				icono: 'bi-info-circle-fill',
+				iconoColor: 'text-blue-600 dark:text-blue-400',
+			};
+	}
+}
+
+function showModalMensajeGenerico(ids, titulo, mensaje, tipo = 'info') {
+	const modal = document.getElementById(ids.modalId);
+	const tituloElement = document.getElementById(ids.tituloId);
+	const contenidoElement = document.getElementById(ids.contenidoId);
+	const iconoElement = document.getElementById(ids.iconoWrapId);
+	const iconoClaseElement = document.getElementById(ids.iconoClaseId);
+	if (!modal || !tituloElement || !contenidoElement || !iconoElement || !iconoClaseElement) return;
+	const { bgColor, icono, iconoColor } = getModalMensajeTipoStyles(tipo);
+	iconoElement.className = `flex-shrink-0 w-12 h-12 ${bgColor} rounded-full flex items-center justify-center`;
+	iconoClaseElement.className = `${icono} ${iconoColor} text-2xl`;
+	tituloElement.textContent = titulo;
+	contenidoElement.textContent = mensaje;
+	modal.classList.remove('hidden');
+}
+
+function wireModalMensajeOverlay(ids) {
+	const btn = document.getElementById(ids.btnCerrarId);
+	if (btn) {
+		btn.addEventListener('click', () => {
+			document.getElementById(ids.modalId)?.classList.add('hidden');
+		});
+	}
+	const modal = document.getElementById(ids.modalId);
+	if (modal) {
+		modal.addEventListener('click', (e) => {
+			if (e.target === modal) modal.classList.add('hidden');
+		});
+	}
+}
+
+function escapeHTML(text) {
+	if (!text) return '';
+	const div = document.createElement('div');
+	div.textContent = text;
+	return div.innerHTML;
+}
+
+/**
+ * HTML de checkboxes de categorías (agregar vs edición comparten layout).
+ * @param {string} inputClass - p. ej. categoria-checkbox o categoria-checkbox-edit
+ * @param {number[]|null} checkedIds - ids marcados (solo edición)
+ */
+function renderCategoriasCheckboxesHtml(categorias, inputClass, checkedIds = null) {
+	if (!categorias || categorias.length === 0) return '';
+	const setChecked = checkedIds ? new Set(checkedIds) : null;
+	return categorias.map(cat => {
+		const checked = setChecked?.has(cat.id) ? 'checked' : '';
+		return `
+			<label class="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+				<input 
+					type="checkbox" 
+					value="${cat.id}" 
+					class="${inputClass} w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700"
+					${checked}
+				/>
+				<span class="text-sm font-medium text-gray-700 dark:text-gray-300" style="color: ${cat.color}">
+					${escapeHTML(cat.nombre)}
+				</span>
+			</label>
+		`;
+	}).join('');
+}
+
 /**
  * Inicializar la aplicación SPA
  */
@@ -312,12 +444,7 @@ async function initNoticiasView() {
 		});
 	}
 
-	// Cargar noticias usando el ViewModel
-	await newsViewModel.loadNews();
-	
 	// No verificar autenticación aquí, ya se hace en Layout.astro
-	// Esto evita verificaciones duplicadas
-	
 	// Inicializar Pusher para notificaciones en tiempo real
 	initPusher();
 }
@@ -353,30 +480,14 @@ async function initPusher() {
 			encrypted: true
 		});
 		
-		// Suscribirse al canal de noticias
 		const channel = pusher.subscribe('noticias');
-		
-		// Escuchar eventos de noticias creadas
-		channel.bind('noticia-creada', (data) => {
-			if (newsViewModel) {
-				newsViewModel.loadNews();
-			}
-		});
-		
-		// Escuchar eventos de noticias actualizadas
-		channel.bind('noticia-actualizada', (data) => {
-			if (newsViewModel) {
-				newsViewModel.loadNews();
-			}
-		});
-		
-		// Escuchar eventos de noticias eliminadas
-		channel.bind('noticia-eliminada', (data) => {
-			if (newsViewModel) {
-				newsViewModel.loadNews();
-			}
-		});
-		
+		const recargarLista = () => {
+			if (newsViewModel) newsViewModel.loadNews();
+		};
+		for (const ev of ['noticia-creada', 'noticia-actualizada', 'noticia-eliminada']) {
+			channel.bind(ev, recargarLista);
+		}
+
 		globalThis._pusherInitialized = true;
 	} catch (error) {
 		console.error('[PUSHER] Error al inicializar Pusher:', error);
@@ -808,32 +919,7 @@ function renderNoticiaView(noticia) {
 			</div>
 		</div>
 
-		<!-- Modal de mensaje genérico -->
-		<div id="modal-mensaje-noticia" class="fixed inset-0 bg-black bg-opacity-50 dark:bg-opacity-70 z-50 hidden flex items-center justify-center">
-			<div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4 transform transition-all">
-				<div class="p-6">
-					<div class="flex items-center gap-3 mb-4">
-						<div id="modal-icono-noticia" class="flex-shrink-0 w-12 h-12 rounded-full flex items-center justify-center">
-							<i id="modal-icono-clase-noticia" class="text-2xl"></i>
-						</div>
-						<h3 id="modal-titulo-mensaje-noticia" class="text-xl font-bold text-gray-900 dark:text-white">
-						</h3>
-					</div>
-					
-					<p id="modal-contenido-mensaje-noticia" class="text-gray-600 dark:text-gray-300 mb-6">
-					</p>
-					
-					<div class="flex gap-3 justify-end">
-						<button
-							id="btn-cerrar-mensaje-noticia"
-							class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors"
-						>
-							Aceptar
-						</button>
-					</div>
-				</div>
-			</div>
-		</div>
+		${modalMensajeCardHtml('noticia')}
 	`;
 
 	// Inicializar funcionalidad de noticia
@@ -988,19 +1074,11 @@ function initNoticiaView(noticia) {
 				const categorias = await response.json();
 				const categoriasActuales = noticiaData.categorias ? noticiaData.categorias.map(c => c.id) : [];
 				
-				container.innerHTML = categorias.map(cat => `
-					<label class="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
-						<input 
-							type="checkbox" 
-							value="${cat.id}" 
-							class="categoria-checkbox-edit w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700"
-							${categoriasActuales.includes(cat.id) ? 'checked' : ''}
-						/>
-						<span class="text-sm font-medium text-gray-700 dark:text-gray-300" style="color: ${cat.color}">
-							${escapeHTML(cat.nombre)}
-						</span>
-					</label>
-				`).join('');
+				container.innerHTML = renderCategoriasCheckboxesHtml(
+					categorias,
+					'categoria-checkbox-edit',
+					categoriasActuales,
+				);
 			}
 		} catch (error) {
 			console.error('Error al cargar categorías:', error);
@@ -1163,62 +1241,11 @@ function initNoticiaView(noticia) {
 		});
 	}
 
-	// Función para mostrar modal de mensaje
 	function mostrarModalMensajeNoticia(titulo, mensaje, tipo = 'info') {
-		const modal = document.getElementById('modal-mensaje-noticia');
-		const tituloElement = document.getElementById('modal-titulo-mensaje-noticia');
-		const contenidoElement = document.getElementById('modal-contenido-mensaje-noticia');
-		const iconoElement = document.getElementById('modal-icono-noticia');
-		const iconoClaseElement = document.getElementById('modal-icono-clase-noticia');
-		
-		if (!modal || !tituloElement || !contenidoElement) return;
-		
-		let bgColor, icono, iconoColor;
-		switch(tipo) {
-			case 'error':
-				bgColor = 'bg-red-100 dark:bg-red-900/30';
-				icono = 'bi-exclamation-circle-fill';
-				iconoColor = 'text-red-600 dark:text-red-400';
-				break;
-			case 'success':
-				bgColor = 'bg-green-100 dark:bg-green-900/30';
-				icono = 'bi-check-circle-fill';
-				iconoColor = 'text-green-600 dark:text-green-400';
-				break;
-			case 'warning':
-				bgColor = 'bg-yellow-100 dark:bg-yellow-900/30';
-				icono = 'bi-exclamation-triangle-fill';
-				iconoColor = 'text-yellow-600 dark:text-yellow-400';
-				break;
-			default:
-				bgColor = 'bg-blue-100 dark:bg-blue-900/30';
-				icono = 'bi-info-circle-fill';
-				iconoColor = 'text-blue-600 dark:text-blue-400';
-		}
-		
-		iconoElement.className = `flex-shrink-0 w-12 h-12 ${bgColor} rounded-full flex items-center justify-center`;
-		iconoClaseElement.className = `${icono} ${iconoColor} text-2xl`;
-		tituloElement.textContent = titulo;
-		contenidoElement.textContent = mensaje;
-		modal.classList.remove('hidden');
+		showModalMensajeGenerico(modalMensajeIds('noticia'), titulo, mensaje, tipo);
 	}
 
-	// Configurar modal de mensaje
-	const btnCerrarMensaje = document.getElementById('btn-cerrar-mensaje-noticia');
-	if (btnCerrarMensaje) {
-		btnCerrarMensaje.addEventListener('click', () => {
-			document.getElementById('modal-mensaje-noticia').classList.add('hidden');
-		});
-	}
-
-	const modalMensaje = document.getElementById('modal-mensaje-noticia');
-	if (modalMensaje) {
-		modalMensaje.addEventListener('click', (e) => {
-			if (e.target === modalMensaje) {
-				modalMensaje.classList.add('hidden');
-			}
-		});
-	}
+	wireModalMensajeOverlay(modalMensajeIds('noticia'));
 
 	// Configurar botones
 	configurarBotones();
@@ -1494,32 +1521,7 @@ async function loadAdminView() {
 			</div>
 		</div>
 
-		<!-- Modal de mensaje genérico -->
-		<div id="modal-mensaje-admin" class="fixed inset-0 bg-black bg-opacity-50 dark:bg-opacity-70 z-50 hidden flex items-center justify-center">
-			<div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4 transform transition-all">
-				<div class="p-6">
-					<div class="flex items-center gap-3 mb-4">
-						<div id="modal-icono-admin" class="flex-shrink-0 w-12 h-12 rounded-full flex items-center justify-center">
-							<i id="modal-icono-clase-admin" class="text-2xl"></i>
-						</div>
-						<h3 id="modal-titulo-mensaje-admin" class="text-xl font-bold text-gray-900 dark:text-white">
-						</h3>
-					</div>
-					
-					<p id="modal-contenido-mensaje-admin" class="text-gray-600 dark:text-gray-300 mb-6">
-					</p>
-					
-					<div class="flex gap-3 justify-end">
-						<button
-							id="btn-cerrar-mensaje-admin"
-							class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors"
-						>
-							Aceptar
-						</button>
-					</div>
-				</div>
-			</div>
-		</div>
+		${modalMensajeCardHtml('admin')}
 	`;
 
 	// Inicializar funcionalidad de admin
@@ -1532,22 +1534,7 @@ async function loadAdminView() {
 function initAdminView() {
 	cargarUsuariosAdmin();
 
-	// Configurar modales
-	const btnCerrarMensaje = document.getElementById('btn-cerrar-mensaje-admin');
-	if (btnCerrarMensaje) {
-		btnCerrarMensaje.addEventListener('click', () => {
-			document.getElementById('modal-mensaje-admin').classList.add('hidden');
-		});
-	}
-
-	const modalMensaje = document.getElementById('modal-mensaje-admin');
-	if (modalMensaje) {
-		modalMensaje.addEventListener('click', (e) => {
-			if (e.target === modalMensaje) {
-				modalMensaje.classList.add('hidden');
-			}
-		});
-	}
+	wireModalMensajeOverlay(modalMensajeIds('admin'));
 
 	// Modal de eliminar usuario
 	let usuarioAEliminar = null;
@@ -1787,42 +1774,7 @@ function initAdminView() {
 	}
 
 	function mostrarModalMensajeAdmin(titulo, mensaje, tipo = 'info') {
-		const modal = document.getElementById('modal-mensaje-admin');
-		const tituloElement = document.getElementById('modal-titulo-mensaje-admin');
-		const contenidoElement = document.getElementById('modal-contenido-mensaje-admin');
-		const iconoElement = document.getElementById('modal-icono-admin');
-		const iconoClaseElement = document.getElementById('modal-icono-clase-admin');
-		
-		if (!modal || !tituloElement || !contenidoElement) return;
-		
-		let bgColor, icono, iconoColor;
-		switch(tipo) {
-			case 'error':
-				bgColor = 'bg-red-100 dark:bg-red-900/30';
-				icono = 'bi-exclamation-circle-fill';
-				iconoColor = 'text-red-600 dark:text-red-400';
-				break;
-			case 'success':
-				bgColor = 'bg-green-100 dark:bg-green-900/30';
-				icono = 'bi-check-circle-fill';
-				iconoColor = 'text-green-600 dark:text-green-400';
-				break;
-			case 'warning':
-				bgColor = 'bg-yellow-100 dark:bg-yellow-900/30';
-				icono = 'bi-exclamation-triangle-fill';
-				iconoColor = 'text-yellow-600 dark:text-yellow-400';
-				break;
-			default:
-				bgColor = 'bg-blue-100 dark:bg-blue-900/30';
-				icono = 'bi-info-circle-fill';
-				iconoColor = 'text-blue-600 dark:text-blue-400';
-		}
-		
-		iconoElement.className = `flex-shrink-0 w-12 h-12 ${bgColor} rounded-full flex items-center justify-center`;
-		iconoClaseElement.className = `${icono} ${iconoColor} text-2xl`;
-		tituloElement.textContent = titulo;
-		contenidoElement.textContent = mensaje;
-		modal.classList.remove('hidden');
+		showModalMensajeGenerico(modalMensajeIds('admin'), titulo, mensaje, tipo);
 	}
 
 	async function manejarEnvioFormularioAdmin(event) {
@@ -2087,32 +2039,7 @@ async function loadAgregarView() {
 			</form>
 		</section>
 
-		<!-- Modal de mensaje genérico -->
-		<div id="modal-mensaje-agregar" class="fixed inset-0 bg-black bg-opacity-50 dark:bg-opacity-70 z-50 hidden flex items-center justify-center">
-			<div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4 transform transition-all">
-				<div class="p-6">
-					<div class="flex items-center gap-3 mb-4">
-						<div id="modal-icono-agregar" class="flex-shrink-0 w-12 h-12 rounded-full flex items-center justify-center">
-							<i id="modal-icono-clase-agregar" class="text-2xl"></i>
-						</div>
-						<h3 id="modal-titulo-mensaje-agregar" class="text-xl font-bold text-gray-900 dark:text-white">
-						</h3>
-					</div>
-					
-					<p id="modal-contenido-mensaje-agregar" class="text-gray-600 dark:text-gray-300 mb-6">
-					</p>
-					
-					<div class="flex gap-3 justify-end">
-						<button
-							id="btn-cerrar-mensaje-agregar"
-							class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors"
-						>
-							Aceptar
-						</button>
-					</div>
-				</div>
-			</div>
-		</div>
+		${modalMensajeCardHtml('agregar')}
 	`;
 
 	// Inicializar funcionalidad de agregar
@@ -2158,18 +2085,7 @@ function initAgregarView() {
 			return;
 		}
 
-		container.innerHTML = categorias.map(cat => `
-			<label class="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
-				<input 
-					type="checkbox" 
-					value="${cat.id}" 
-					class="categoria-checkbox w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700"
-				/>
-				<span class="text-sm font-medium text-gray-700 dark:text-gray-300" style="color: ${cat.color}">
-					${escapeHTML(cat.nombre)}
-				</span>
-			</label>
-		`).join('');
+		container.innerHTML = renderCategoriasCheckboxesHtml(categorias, 'categoria-checkbox');
 	}
 
 	cargarCategorias();
@@ -2270,59 +2186,10 @@ function initAgregarView() {
 	}
 
 	function mostrarModalMensajeAgregar(titulo, mensaje, tipo = 'info') {
-		const modal = document.getElementById('modal-mensaje-agregar');
-		const tituloElement = document.getElementById('modal-titulo-mensaje-agregar');
-		const contenidoElement = document.getElementById('modal-contenido-mensaje-agregar');
-		const iconoElement = document.getElementById('modal-icono-agregar');
-		const iconoClaseElement = document.getElementById('modal-icono-clase-agregar');
-		
-		if (!modal || !tituloElement || !contenidoElement) return;
-		
-		let bgColor, icono, iconoColor;
-		switch(tipo) {
-			case 'error':
-				bgColor = 'bg-red-100 dark:bg-red-900/30';
-				icono = 'bi-exclamation-circle-fill';
-				iconoColor = 'text-red-600 dark:text-red-400';
-				break;
-			case 'success':
-				bgColor = 'bg-green-100 dark:bg-green-900/30';
-				icono = 'bi-check-circle-fill';
-				iconoColor = 'text-green-600 dark:text-green-400';
-				break;
-			case 'warning':
-				bgColor = 'bg-yellow-100 dark:bg-yellow-900/30';
-				icono = 'bi-exclamation-triangle-fill';
-				iconoColor = 'text-yellow-600 dark:text-yellow-400';
-				break;
-			default:
-				bgColor = 'bg-blue-100 dark:bg-blue-900/30';
-				icono = 'bi-info-circle-fill';
-				iconoColor = 'text-blue-600 dark:text-blue-400';
-		}
-		
-		iconoElement.className = `flex-shrink-0 w-12 h-12 ${bgColor} rounded-full flex items-center justify-center`;
-		iconoClaseElement.className = `${icono} ${iconoColor} text-2xl`;
-		tituloElement.textContent = titulo;
-		contenidoElement.textContent = mensaje;
-		modal.classList.remove('hidden');
+		showModalMensajeGenerico(modalMensajeIds('agregar'), titulo, mensaje, tipo);
 	}
 
-	const btnCerrarMensaje = document.getElementById('btn-cerrar-mensaje-agregar');
-	if (btnCerrarMensaje) {
-		btnCerrarMensaje.addEventListener('click', () => {
-			document.getElementById('modal-mensaje-agregar').classList.add('hidden');
-		});
-	}
-
-	const modalMensaje = document.getElementById('modal-mensaje-agregar');
-	if (modalMensaje) {
-		modalMensaje.addEventListener('click', (e) => {
-			if (e.target === modalMensaje) {
-				modalMensaje.classList.add('hidden');
-			}
-		});
-	}
+	wireModalMensajeOverlay(modalMensajeIds('agregar'));
 }
 
 /**
@@ -2802,16 +2669,6 @@ function initRegistroView() {
 			}
 		});
 	}
-}
-
-/**
- * Funciones auxiliares
- */
-function escapeHTML(text) {
-	if (!text) return '';
-	const div = document.createElement('div');
-	div.textContent = text;
-	return div.innerHTML;
 }
 
 // Inicializar aplicación cuando el DOM esté listo
