@@ -440,7 +440,7 @@ class NewsViewModel {
 }
 
 // Exportar para uso global
-if (typeof globalThis.window !== 'undefined') {
+if (globalThis.window !== undefined) {
     globalThis.NewsViewModel = NewsViewModel;
 }
 

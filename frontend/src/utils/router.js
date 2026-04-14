@@ -151,7 +151,7 @@ class Router {
 	 * @returns {Object} - Parámetros de la URL
 	 */
 	getQueryParams() {
-		const params = new URLSearchParams(window.location.search);
+		const params = new URLSearchParams(globalThis.location.search);
 		const result = {};
 		for (const [key, value] of params.entries()) {
 			result[key] = value;
@@ -169,7 +169,7 @@ class Router {
 }
 
 // Instancia global del router
-if (typeof globalThis.window !== 'undefined') {
+if (globalThis.window !== undefined) {
 	globalThis.router = new Router();
 	
 	// Inicializar cuando el DOM esté listo

@@ -43,6 +43,14 @@ async function obtenerNombreUsuarioSesion() {
 	return info?.usuario ?? null;
 }
 
+/** Admin/superadmin pueden eliminar noticias (ámbito módulo; evita función async anidada repetida). */
+async function usuarioPuedeEliminarNoticia() {
+	const userInfo = await obtenerUsuarioActualDesdeApi();
+	if (!userInfo) return false;
+	const role = userInfo.rol;
+	return role === 'admin' || role === 'superadmin';
+}
+
 function getRoleBadgeClass(rol) {
 	const classes = {
 		superadmin: 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200',
@@ -246,7 +254,7 @@ async function initNoticiasView() {
 	});
 
 	// Inicializar Observer Pattern para sincronización de UI (solo una vez)
-	if (globalThis.NewsObserver && globalThis.NewsObserver.getNewsEventSubject && !globalThis._observersInitialized) {
+	if (!globalThis._observersInitialized && globalThis.NewsObserver?.getNewsEventSubject) {
 		const newsSubject = globalThis.NewsObserver.getNewsEventSubject();
 		
 		// Observer para recargar la lista cuando cambian las noticias
@@ -519,11 +527,14 @@ function renderPagination() {
 		return;
 	}
 
+	const prevDisabled = currentPage === 0;
+	const nextDisabled = !hasMore;
+
 	const html = `
 		<div class="flex justify-center gap-2">
 			<button
-				class="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg ${currentPage === 0 ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-100 dark:hover:bg-gray-700'}"
-				${currentPage === 0 ? 'disabled' : ''}
+				class="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg ${prevDisabled ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-100 dark:hover:bg-gray-700'}"
+				${prevDisabled ? 'disabled' : ''}
 				data-page="prev"
 			>
 				Anterior
@@ -532,8 +543,8 @@ function renderPagination() {
 				Página ${currentPage + 1}
 			</span>
 			<button
-				class="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg ${!hasMore ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-100 dark:hover:bg-gray-700'}"
-				${!hasMore ? 'disabled' : ''}
+				class="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg ${nextDisabled ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-100 dark:hover:bg-gray-700'}"
+				${nextDisabled ? 'disabled' : ''}
 				data-page="next"
 			>
 				Siguiente
@@ -876,19 +887,12 @@ function initNoticiaView(noticia) {
 		return false;
 	}
 
-	async function puedeEliminar() {
-		const userInfo = await obtenerUsuarioActualDesdeApi();
-		if (!userInfo) return false;
-		const role = userInfo.rol;
-		return role === 'admin' || role === 'superadmin';
-	}
-
 	async function configurarBotones() {
 		const menuAcciones = document.getElementById('menu-acciones-noticia');
 		if (!menuAcciones) return;
 
 		const puedeEditarNoticia = await puedeEditar();
-		const puedeEliminarNoticia = await puedeEliminar();
+		const puedeEliminarNoticia = await usuarioPuedeEliminarNoticia();
 
 		// Mostrar el menú solo si el usuario tiene permisos
 		if (puedeEditarNoticia || puedeEliminarNoticia) {
@@ -910,10 +914,10 @@ function initNoticiaView(noticia) {
 				btnEditarMenu.classList.remove('hidden');
 				btnEditarMenu.addEventListener('click', () => {
 					dropdownMenu.classList.add('hidden');
-					if (!modoEdicion) {
-						entrarModoEdicion();
-					} else {
+					if (modoEdicion) {
 						cancelarEdicion();
+					} else {
+						entrarModoEdicion();
 					}
 				});
 			} else {
@@ -1076,10 +1080,7 @@ function initNoticiaView(noticia) {
 			noticiaData = noticiaActualizada;
 
 			// Notificar al observer sobre la actualización (patrón Observer)
-			if (globalThis.NewsObserver && globalThis.NewsObserver.getNewsEventSubject) {
-				const newsSubject = globalThis.NewsObserver.getNewsEventSubject();
-				newsSubject.newsUpdated(noticiaActualizada);
-			}
+			globalThis.NewsObserver?.getNewsEventSubject?.()?.newsUpdated(noticiaActualizada);
 
 			// Actualizar UI
 			const tituloTexto = document.getElementById('titulo-texto');
@@ -1143,10 +1144,7 @@ function initNoticiaView(noticia) {
 			}
 
 			// Notificar al observer sobre la eliminación (patrón Observer)
-			if (globalThis.NewsObserver && globalThis.NewsObserver.getNewsEventSubject) {
-				const newsSubject = globalThis.NewsObserver.getNewsEventSubject();
-				newsSubject.newsDeleted(noticiaData.id);
-			}
+			globalThis.NewsObserver?.getNewsEventSubject?.()?.newsDeleted(noticiaData.id);
 
 			cerrarModalEliminar();
 			mostrarModalMensajeNoticia('Éxito', 'Noticia eliminada exitosamente', 'success');
@@ -1774,7 +1772,7 @@ function initAdminView() {
 		}
 
 		tbody.innerHTML = usuarios.map(usuario => {
-			const usuarioEscapado = escapeHTML(usuario.usuario).replaceAll("'", "\\'").replaceAll('"', '&quot;');
+			const usuarioEscapado = escapeHTML(usuario.usuario).replaceAll("'", String.raw`\'`).replaceAll('"', '&quot;');
 			return `
 			<tr class="hover:bg-gray-50 dark:hover:bg-gray-700">
 				<td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">
@@ -2278,10 +2276,7 @@ function initAgregarView() {
 				const nuevaNoticia = await agregarViewModel.createNews(datosNoticia);
 				
 				// Notificar al observer sobre la creación (patrón Observer)
-				if (globalThis.NewsObserver && globalThis.NewsObserver.getNewsEventSubject) {
-					const newsSubject = globalThis.NewsObserver.getNewsEventSubject();
-					newsSubject.newsCreated(nuevaNoticia);
-				}
+				globalThis.NewsObserver?.getNewsEventSubject?.()?.newsCreated(nuevaNoticia);
 				
 				mostrarModalMensajeAgregar('¡Éxito!', 'Noticia creada exitosamente!', 'success');
 				formulario.reset();
@@ -2684,6 +2679,7 @@ async function loadLoginView() {
 					errorDiv.classList.remove('hidden');
 				}
 			} catch (error) {
+				console.debug('[login] Fallo de red o parseo:', error instanceof Error ? error.message : error);
 				errorDiv.textContent = 'Error al conectar con el servidor';
 				errorDiv.classList.remove('hidden');
 			}
@@ -2829,6 +2825,7 @@ function initRegistroView() {
 					}
 				}, 2000);
 			} catch (error) {
+				console.debug('[registro] Fallo de red o parseo:', error instanceof Error ? error.message : error);
 				errorDiv.textContent = 'Error al registrar usuario. Por favor, intenta nuevamente.';
 				errorDiv.classList.remove('hidden');
 			}

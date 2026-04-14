@@ -101,6 +101,61 @@ class DatabaseJSON:
         self._data["last_ids"][table_name] += 1
         return self._data["last_ids"][table_name]
 
+    def _psc_split_as_alias(self, f: str) -> Tuple[str, Optional[str]]:
+        alias = None
+        if ' AS ' in f.upper():
+            parts = f.split(' AS ', 1)
+            if len(parts) >= 2:
+                f = parts[0].strip()
+                alias = parts[1].strip().strip('`"')
+        return f, alias
+
+    @staticmethod
+    def _psc_simple_qualified_field(f: str) -> str:
+        if '(' not in f and '.' in f:
+            return f.split('.')[-1]
+        return f
+
+    @staticmethod
+    def _psc_field_from_table_dot_matches(match: List[Tuple[str, str]]) -> str:
+        for table_prefix, field_name in match:
+            if table_prefix.lower() == 'n':
+                return field_name
+        return match[0][1]
+
+    def _psc_field_from_inner_parts(self, inner_parts: List[str]) -> str:
+        for part in inner_parts:
+            if '.' in part:
+                field_part = part.split('.')[-1].strip()
+                if not (field_part.startswith("'") or field_part.startswith('"')):
+                    return field_part
+        if inner_parts:
+            first = inner_parts[0].strip()
+            return first.split('.')[-1] if '.' in first else first.strip('`"\'')
+        return 'autor'
+
+    def _psc_resolve_paren_field(self, f: str) -> str:
+        if '(' not in f or ')' not in f:
+            return f
+        match = re.findall(r'(\w+)\.(\w+)', f)
+        if match:
+            return self._psc_field_from_table_dot_matches(match)
+        inner_match = re.search(r'\(([^)]+)\)', f)
+        if not inner_match:
+            return 'autor'
+        inner = inner_match.group(1).strip()
+        inner_parts = [p.strip() for p in inner.split(',')]
+        return self._psc_field_from_inner_parts(inner_parts)
+
+    def _psc_normalize_one_raw_field(self, raw: str) -> Tuple[str, Optional[str]]:
+        f = raw.strip().strip('`"')
+        f, alias = self._psc_split_as_alias(f)
+        f = self._psc_simple_qualified_field(f)
+        if '(' in f and ')' in f:
+            f = self._psc_resolve_paren_field(f)
+        field_name = f.strip('`"')
+        return field_name, alias
+
     def _parse_select_column_clause(self, result: Dict[str, Any], fields_str: str) -> None:
         """Rellena fields / field_aliases del resultado para SELECT."""
         if fields_str == '*':
@@ -109,45 +164,10 @@ class DatabaseJSON:
         if 'COUNT' in fields_str.upper():
             result["fields"] = ['COUNT(*)']
             return
-        fields = []
-        field_aliases = {}
+        fields: List[str] = []
+        field_aliases: Dict[str, str] = {}
         for raw in fields_str.split(','):
-            f = raw.strip().strip('`"')
-            alias = None
-            if ' AS ' in f.upper():
-                parts = f.split(' AS ', 1)
-                if len(parts) >= 2:
-                    f = parts[0].strip()
-                    alias = parts[1].strip().strip('`"')
-            if '(' not in f and '.' in f:
-                f = f.split('.')[-1]
-            if '(' in f and ')' in f:
-                match = re.findall(r'(\w+)\.(\w+)', f)
-                if match:
-                    for table_prefix, field_name in match:
-                        if table_prefix.lower() == 'n':
-                            f = field_name
-                            break
-                    else:
-                        f = match[0][1]
-                else:
-                    inner_match = re.search(r'\(([^)]+)\)', f)
-                    if inner_match:
-                        inner = inner_match.group(1).strip()
-                        inner_parts = [p.strip() for p in inner.split(',')]
-                        for part in inner_parts:
-                            if '.' in part:
-                                field_part = part.split('.')[-1].strip()
-                                if not (field_part.startswith("'") or field_part.startswith('"')):
-                                    f = field_part
-                                    break
-                        else:
-                            if inner_parts:
-                                first = inner_parts[0].strip()
-                                f = first.split('.')[-1] if '.' in first else first.strip('`"\'')
-                    else:
-                        f = 'autor'
-            field_name = f.strip('`"')
+            field_name, alias = self._psc_normalize_one_raw_field(raw)
             fields.append(field_name)
             if alias:
                 field_aliases[alias] = field_name
@@ -302,6 +322,30 @@ class DatabaseJSON:
             where_clause = query[where_start:].strip()
             result["where"] = self._parse_where_clause(where_clause, params)
 
+    @staticmethod
+    def _where_op_position(part: str, op: str) -> Tuple[int, str]:
+        if op == SQL_LIKE_TOKEN:
+            pos = part.upper().find(SQL_LIKE_TOKEN.upper())
+            return pos, 'LIKE'
+        if op == SQL_IN_TOKEN:
+            pos = part.upper().find(SQL_IN_TOKEN.upper())
+            return pos, 'IN'
+        op_clean = op.strip()
+        return part.find(op), op_clean
+
+    @staticmethod
+    def _where_bind_value(
+        raw_value: str, params: Optional[Tuple], param_index: int
+    ) -> Tuple[Any, int]:
+        if raw_value == '%s' and params and param_index < len(params):
+            return params[param_index], param_index + 1
+        if raw_value.startswith('(') and raw_value.endswith(')'):
+            inner = raw_value[1:-1].strip()
+            if params and param_index < len(params):
+                return params[param_index], param_index + 1
+            return [v.strip().strip("'\"") for v in inner.split(',')], param_index
+        return raw_value.strip("'\""), param_index
+
     def _parse_where_part(
         self, part: str, params: Optional[Tuple], param_index: int
     ) -> Tuple[Optional[Dict[str, Any]], int]:
@@ -310,43 +354,19 @@ class DatabaseJSON:
             op_clean = op.strip()
             if not (op_clean in part.upper() or op in part):
                 continue
-            if op == SQL_LIKE_TOKEN:
-                op_pos = part.upper().find(SQL_LIKE_TOKEN.upper())
-                op_used = 'LIKE'
-            elif op == SQL_IN_TOKEN:
-                op_pos = part.upper().find(SQL_IN_TOKEN.upper())
-                op_used = 'IN'
-            else:
-                op_pos = part.find(op)
-                op_used = op_clean
-
+            op_pos, op_used = self._where_op_position(part, op)
             if op_pos == -1:
                 continue
-
             field = part[:op_pos].strip().strip('`"')
             if '.' in field:
                 field = field.split('.')[-1]
-            value = part[op_pos + len(op):].strip()
-
-            if value == '%s' and params and param_index < len(params):
-                value = params[param_index]
-                param_index += 1
-            elif value.startswith('(') and value.endswith(')'):
-                value = value[1:-1].strip()
-                if params and param_index < len(params):
-                    value = params[param_index]
-                    param_index += 1
-                else:
-                    value = [v.strip().strip("'\"") for v in value.split(',')]
-            else:
-                value = value.strip("'\"")
-
+            value_tail = part[op_pos + len(op):].strip()
+            value, param_index = self._where_bind_value(value_tail, params, param_index)
             return ({
                 "field": field,
                 "operator": op_used,
                 "value": value
             }, param_index)
-
         return (None, param_index)
 
     def _parse_where_clause(self, where_clause: str, params: Optional[Tuple] = None) -> List[Dict[str, Any]]:
@@ -399,7 +419,7 @@ class DatabaseJSON:
             return records
         return [r for r in records if self._record_matches_where(r, conditions)]
 
-    def _json_missing_table(self, fetch_one: bool, fetch_all: bool):
+    def _json_missing_table(self, fetch_all: bool):
         logger.warning("Tabla no encontrada en almacén JSON")
         if fetch_all:
             return []
@@ -531,7 +551,7 @@ class DatabaseJSON:
                 table = parsed["table"]
                 
                 if not table or table not in self._data:
-                    return self._json_missing_table(fetch_one, fetch_all)
+                    return self._json_missing_table(fetch_all)
                 
                 if operation == "SELECT":
                     return self._json_op_select(
@@ -672,6 +692,24 @@ class DatabaseJSON:
             adjusted_where.append(adj_cond)
         return self._apply_where(main_records, adjusted_where)
 
+    @staticmethod
+    def _join_find_matching_record(
+        join_records: List[Dict], join_field: str, main_value: Any
+    ) -> Optional[Dict]:
+        for join_rec in join_records:
+            if join_rec.get(join_field) == main_value:
+                return join_rec
+        return None
+
+    @staticmethod
+    def _join_merge_single_row(main_rec: Dict, matched_join_rec: Optional[Dict]) -> Dict:
+        combined = main_rec.copy()
+        if matched_join_rec:
+            for key, value in matched_join_rec.items():
+                if key not in combined:
+                    combined[key] = value
+        return combined
+
     def _join_combine_rows(
         self,
         filtered_main: List[Dict],
@@ -683,42 +721,27 @@ class DatabaseJSON:
         result = []
         for main_rec in filtered_main:
             main_value = main_rec.get(main_field)
-            matched_join_rec = None
-            for join_rec in join_records:
-                if join_rec.get(join_field) == main_value:
-                    matched_join_rec = join_rec
-                    break
-            if not matched_join_rec and not is_left_join:
+            matched = self._join_find_matching_record(join_records, join_field, main_value)
+            if not matched and not is_left_join:
                 continue
-            combined = main_rec.copy()
-            if matched_join_rec:
-                for key, value in matched_join_rec.items():
-                    if key not in combined:
-                        combined[key] = value
-            result.append(combined)
+            result.append(self._join_merge_single_row(main_rec, matched))
         return result
+
+    def _join_project_one_record(self, record: Dict, parsed: Dict) -> Dict:
+        filtered_record: Dict[str, Any] = {}
+        for field in parsed["fields"]:
+            clean_field = field.split('.')[-1]
+            filtered_record[clean_field] = record.get(clean_field)
+        field_aliases = parsed.get("field_aliases", {})
+        for alias, real_field in field_aliases.items():
+            clean_real = real_field.split('.')[-1] if '.' in real_field else real_field
+            filtered_record[alias] = record.get(clean_real)
+        return filtered_record
 
     def _join_project_join_fields(self, result: List[Dict], parsed: Dict) -> List[Dict]:
         if not parsed.get("fields") or parsed["fields"] == ['*']:
             return result
-        filtered_result = []
-        field_aliases = parsed.get("field_aliases", {})
-        for record in result:
-            filtered_record = {}
-            for field in parsed["fields"]:
-                clean_field = field.split('.')[-1]
-                if clean_field in record:
-                    filtered_record[clean_field] = record[clean_field]
-                else:
-                    filtered_record[clean_field] = None
-            for alias, real_field in field_aliases.items():
-                clean_real_field = real_field.split('.')[-1] if '.' in real_field else real_field
-                if clean_real_field in record:
-                    filtered_record[alias] = record[clean_real_field]
-                else:
-                    filtered_record[alias] = None
-            filtered_result.append(filtered_record)
-        return filtered_result
+        return [self._join_project_one_record(r, parsed) for r in result]
 
     def _handle_join_query(self, query: str, parsed: Dict) -> List[Dict]:
         """

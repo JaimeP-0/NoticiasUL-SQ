@@ -212,7 +212,7 @@ class NewsModel {
 }
 
 // Exportar para uso global
-if (typeof globalThis.window !== 'undefined') {
+if (globalThis.window !== undefined) {
     globalThis.NewsModel = NewsModel;
 }
 
