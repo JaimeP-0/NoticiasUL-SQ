@@ -7,22 +7,9 @@
 let currentView = null;
 let appContainer = null;
 
-/** Slug URL a partir de título (compartido entre vistas). Sin regex con cuantificadores anidables (ReDoS). */
+/** Slug URL (implementación en utils/newsShared.js → buildNewsSlug). */
 function generarSlug(texto) {
-	if (!texto) return '';
-	let s = texto.toString().toLowerCase().trim();
-	s = s.replaceAll(/\s/g, '-');
-	s = s.normalize('NFD');
-	s = s.replaceAll(/[\u0300-\u036f]/g, '');
-	s = s.replaceAll(/[^a-z0-9-]/g, '');
-	s = s.split('-').filter(Boolean).join('-');
-	if (s.length > 100) {
-		s = s.slice(0, 100);
-	}
-	while (s.endsWith('-')) {
-		s = s.slice(0, -1);
-	}
-	return s;
+	return globalThis.buildNewsSlug(texto);
 }
 
 async function obtenerUsuarioActualDesdeApi() {
@@ -609,23 +596,7 @@ async function loadNoticiaView(newsId) {
 function renderNoticiaView(noticia) {
 	if (!appContainer) return;
 
-	let fecha = 'Fecha no disponible';
-	if (noticia.fecha) {
-		try {
-			const date = new Date(noticia.fecha);
-			if (!Number.isNaN(date.getTime())) {
-				fecha = date.toLocaleDateString('es-ES', {
-					year: 'numeric',
-					month: 'long',
-					day: 'numeric',
-					hour: '2-digit',
-					minute: '2-digit'
-				});
-			}
-		} catch (e) {
-			console.error('Error al formatear fecha:', e);
-		}
-	}
+	const fecha = globalThis.formatNewsDateTimeDisplay(noticia.fecha);
 
 	const categoriasHTML = noticia.categorias && noticia.categorias.length > 0
 		? noticia.categorias.map(cat => `

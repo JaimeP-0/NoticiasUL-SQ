@@ -363,58 +363,21 @@ class NewsViewModel {
     }
 
     formatDate(dateString) {
-        if (!dateString) {
-            return 'Fecha no disponible';
-        }
-        try {
-            const date = new Date(dateString);
-            // Verificar si la fecha es válida
-            if (Number.isNaN(date.getTime())) {
-                return 'Fecha no disponible';
-            }
-            return date.toLocaleDateString('es-ES', {
-                year: 'numeric',
-                month: 'long',
-                day: 'numeric'
-            });
-        } catch (e) {
-            console.error('Error al formatear fecha:', e, dateString);
-            return 'Fecha no disponible';
-        }
+        return globalThis.formatNewsDateDisplay(dateString);
     }
 
     /**
      * Formatear fecha con hora
      */
     formatDateTime(dateString) {
-        const date = new Date(dateString);
-        return date.toLocaleDateString('es-ES', {
-            year: 'numeric',
-            month: 'long',
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit'
-        });
+        return globalThis.formatNewsDateTimeDisplay(dateString);
     }
 
     /**
-     * Generar slug a partir de un texto
+     * Generar slug a partir de un texto (implementación en utils/newsShared.js).
      */
     generateSlug(text) {
-        if (!text) return '';
-        let s = text.toString().toLowerCase().trim();
-        s = s.replaceAll(/\s/g, '-');
-        s = s.normalize('NFD');
-        s = s.replaceAll(/[\u0300-\u036f]/g, '');
-        s = s.replaceAll(/[^a-z0-9-]/g, '');
-        s = s.split('-').filter(Boolean).join('-');
-        if (s.length > 100) {
-            s = s.slice(0, 100);
-        }
-        while (s.endsWith('-')) {
-            s = s.slice(0, -1);
-        }
-        return s;
+        return globalThis.buildNewsSlug(text);
     }
 
     /**
