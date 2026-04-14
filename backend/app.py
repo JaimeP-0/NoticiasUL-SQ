@@ -180,6 +180,21 @@ logger.info(f"Sistema de logging inicializado - Backend: {os.path.join(log_dir, 
 
 app = Flask(__name__)
 
+# SECRET_KEY: necesaria para extensiones que firmen datos (p. ej. CSRF futuro, sesiones).
+_flask_secret = os.environ.get('SECRET_KEY') or os.environ.get('FLASK_SECRET_KEY')
+if not _flask_secret:
+    logger.warning(
+        "SECRET_KEY / FLASK_SECRET_KEY no definidas en el entorno; usar solo en desarrollo."
+    )
+    _flask_secret = 'desarrollo-no-usar-en-produccion'
+app.config['SECRET_KEY'] = _flask_secret
+
+# Política CSRF (API JSON + cookie HttpOnly JWT, sin formularios WTForms en servidor):
+# - No se usa Flask-WTF: los endpoints son JSON; el riesgo clásico de formulario auto-enviado no aplica igual.
+# - Mitigaciones activas: cookie auth_token con SameSite (Lax o None+Secure vía _login_cookie_settings),
+#   CORS con orígenes explícitos y credenciales, rate limit en /api/login, mutaciones con JWT en cookie.
+# Si se expone formulario HTML server-side, añadir CSRF (p. ej. Flask-WTF + token en cabecera).
+
 # Configurar CORS con soporte para cookies
 # Nota: No se puede usar '*' con supports_credentials=True, por eso especificamos orígenes
 # Permitir dominios de Cloudflare Tunnel dinámicamente usando un decorador
@@ -697,20 +712,10 @@ def delete_user(user_id):
         logger.error(f"Error al eliminar usuario: {e}")
         return jsonify({"error": "Error al eliminar usuario"}), 500
 
-@app.route('/api/login', methods=['POST', 'OPTIONS'])
+@app.route('/api/login', methods=['POST'])
 @apply_rate_limit("5 per minute")
 def login():
-    """Endpoint para autenticación de usuarios - usa cookies HTTP-only con rate limiting"""
-    if request.method == 'OPTIONS':
-        response = jsonify({})
-        origin = request.headers.get('Origin', '')
-        if origin and (TRYCLOUDFLARE_DOMAIN in origin or origin in Config.CORS_ORIGINS):
-            response.headers['Access-Control-Allow-Origin'] = origin
-            response.headers['Access-Control-Allow-Credentials'] = 'true'
-            response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
-            response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
-        return response, 200
-
+    """Autenticación (solo POST). El preflight CORS OPTIONS lo gestiona flask-cors."""
     try:
         logger.info("[LOGIN] Solicitud de autenticación recibida")
         data = request.get_json() or {}
@@ -810,9 +815,9 @@ def login():
         return jsonify({"error": "Error interno del servidor"}), 500
 
 
-@app.route('/api/auth/logout', methods=['POST', 'GET'])
+@app.route('/api/auth/logout', methods=['POST'])
 def logout():
-    """Endpoint para cerrar sesión"""
+    """Cerrar sesión (solo POST; evita logout vía enlace GET / CSRF por imagen)."""
     try:
         response = jsonify({
             "mensaje": "Sesión cerrada exitosamente"
@@ -1240,9 +1245,10 @@ def get_permissions():
         logger.error(f"Error al obtener permisos: {e}")
         return jsonify({"error": "Error al obtener permisos"}), 500
 
-@app.route('/api/cache/clear', methods=['POST', 'GET'])
+@app.route('/api/cache/clear', methods=['POST'])
+@require_permission('manage_admins')
 def clear_cache():
-    """Limpiar toda la caché del sistema (accesible por GET o POST para facilitar uso)"""
+    """Limpiar caché (solo POST, requiere superadmin)."""
     try:
         cache.clear()
         logger.info("Caché limpiada manualmente")
@@ -1254,9 +1260,9 @@ def clear_cache():
         logger.error(f"Error al limpiar caché: {e}")
         return jsonify({"error": "Error al limpiar caché"}), 500
 
-@app.route('/api/auth/test-cookie', methods=['GET', 'POST'])
+@app.route('/api/auth/test-cookie', methods=['POST'])
 def test_cookie():
-    """Endpoint de prueba para verificar que las cookies funcionen"""
+    """Prueba de cookie (solo POST; GET no debe alterar estado ni fijar cookies)."""
     try:
         logger.info("[TEST-COOKIE] Endpoint llamado")
         logger.info("[TEST-COOKIE] Petición de prueba (detalles de cabeceras no registrados)")
