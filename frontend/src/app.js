@@ -7,21 +7,22 @@
 let currentView = null;
 let appContainer = null;
 
-/** Slug URL a partir de título (compartido entre vistas). */
+/** Slug URL a partir de título (compartido entre vistas). Sin regex con cuantificadores anidables (ReDoS). */
 function generarSlug(texto) {
 	if (!texto) return '';
-	return texto
-		.toString()
-		.toLowerCase()
-		.trim()
-		.replaceAll(/\s+/g, '-')
-		.normalize('NFD')
-		.replaceAll(/[\u0300-\u036f]/g, '')
-		.replaceAll(/[^a-z0-9-]/g, '')
-		.replaceAll(/-+/g, '-')
-		.replaceAll(/^-+|-+$/g, '')
-		.substring(0, 100)
-		.replaceAll(/-+$/, '');
+	let s = texto.toString().toLowerCase().trim();
+	s = s.replaceAll(/\s/g, '-');
+	s = s.normalize('NFD');
+	s = s.replaceAll(/[\u0300-\u036f]/g, '');
+	s = s.replaceAll(/[^a-z0-9-]/g, '');
+	s = s.split('-').filter(Boolean).join('-');
+	if (s.length > 100) {
+		s = s.slice(0, 100);
+	}
+	while (s.endsWith('-')) {
+		s = s.slice(0, -1);
+	}
+	return s;
 }
 
 async function obtenerUsuarioActualDesdeApi() {

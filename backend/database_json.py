@@ -195,6 +195,28 @@ class DatabaseJSON:
 
         return result
 
+    @staticmethod
+    def _index_after_sql_keyword(query: str, keyword: str) -> Optional[int]:
+        """Índice tras palabra clave SQL completa; evita (.+)$ y lookaheads con backtracking (ReDoS)."""
+        m = re.search(rf'\b{re.escape(keyword)}\b', query, re.IGNORECASE)
+        return m.end() if m else None
+
+    @staticmethod
+    def _trim_sql_tail_before_order_limit(tail: str) -> str:
+        """Recorta antes del primer ORDER BY o LIMIT en tail (búsqueda lineal + un \bLIMIT\b acotado)."""
+        if not tail:
+            return tail
+        upper = tail.upper()
+        end = len(tail)
+        pos_ob = upper.find('ORDER BY')
+        if pos_ob != -1:
+            end = min(end, pos_ob)
+        segment = tail[:end]
+        lm = re.search(r'\bLIMIT\b', segment, re.IGNORECASE)
+        if lm:
+            end = min(end, lm.start())
+        return tail[:end].strip()
+
     def _fill_parse_select(self, query: str, result: Dict[str, Any], params: Optional[Tuple]) -> None:
         result["operation"] = "SELECT"
         select_match = re.search(r'SELECT\s+(.*?)\s+FROM', query, re.IGNORECASE)
@@ -205,14 +227,12 @@ class DatabaseJSON:
         if from_match:
             result["table"] = from_match.group(1)
 
-        where_match = re.search(
-            r'WHERE\s+(.+)(?=\s+ORDER\s+BY|\s+LIMIT\b|$)',
-            query,
-            re.IGNORECASE | re.DOTALL,
-        )
-        if where_match:
-            where_clause = where_match.group(1).strip()
-            result["where"] = self._parse_where_clause(where_clause, params)
+        where_start = self._index_after_sql_keyword(query, 'WHERE')
+        if where_start is not None:
+            tail = query[where_start:].lstrip()
+            where_clause = self._trim_sql_tail_before_order_limit(tail)
+            if where_clause:
+                result["where"] = self._parse_where_clause(where_clause, params)
 
         order_match = re.search(r'ORDER\s+BY\s+(\w+)(?:\s+(ASC|DESC))?(?:\s+LIMIT|$)', query, re.IGNORECASE)
         if order_match:
@@ -252,22 +272,23 @@ class DatabaseJSON:
         if update_match:
             result["table"] = update_match.group(1)
 
-        set_match = re.search(
-            r'SET\s+(.+)(?=\s+WHERE\b|$)',
-            query,
-            re.IGNORECASE | re.DOTALL,
-        )
-        if set_match:
-            set_clause = set_match.group(1).strip()
+        set_start = self._index_after_sql_keyword(query, 'SET')
+        if set_start is not None:
+            rest = query[set_start:].lstrip()
+            where_in_rest = re.search(r'\bWHERE\b', rest, re.IGNORECASE)
+            if where_in_rest:
+                set_clause = rest[:where_in_rest.start()].strip()
+            else:
+                set_clause = rest.strip()
             set_parts = set_clause.split(',')
             for part in set_parts:
                 if '=' in part:
                     field, value = part.split('=', 1)
                     result["set_fields"][field.strip()] = value.strip().strip("'\"")
 
-        where_match = re.search(r'WHERE\s+(.+)$', query, re.IGNORECASE | re.DOTALL)
-        if where_match:
-            where_clause = where_match.group(1).strip()
+        where_start = self._index_after_sql_keyword(query, 'WHERE')
+        if where_start is not None:
+            where_clause = query[where_start:].strip()
             result["where"] = self._parse_where_clause(where_clause, params)
 
     def _fill_parse_delete(self, query: str, result: Dict[str, Any], params: Optional[Tuple]) -> None:
@@ -276,9 +297,9 @@ class DatabaseJSON:
         if delete_match:
             result["table"] = delete_match.group(1)
 
-        where_match = re.search(r'WHERE\s+(.+)$', query, re.IGNORECASE | re.DOTALL)
-        if where_match:
-            where_clause = where_match.group(1).strip()
+        where_start = self._index_after_sql_keyword(query, 'WHERE')
+        if where_start is not None:
+            where_clause = query[where_start:].strip()
             result["where"] = self._parse_where_clause(where_clause, params)
 
     def _parse_where_part(
